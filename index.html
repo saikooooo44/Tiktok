@@ -1,0 +1,2922 @@
+
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#111318">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='40' fill='none' stroke='%23f5b13d' stroke-width='9'/%3E%3Ccircle cx='50' cy='50' r='20' fill='none' stroke='%233d5fc8' stroke-width='9'/%3E%3C/svg%3E">
+<title>Ring Bounce Generator</title>
+
+<style>
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #111318;
+  color: #f3f3f3;
+  font-family: Arial, sans-serif;
+}
+
+/* Disposition : réglages à gauche, aperçu au centre, réglages à droite.
+   Tout tient dans la hauteur de l'écran ; chaque colonne défile seule
+   uniquement si l'écran est vraiment petit. */
+.app {
+  height: 100vh;
+  min-height: 640px;
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr) 300px;
+  gap: 12px;
+  padding: 12px;
+}
+
+.side {
+  background: #1d2028;
+  border: 1px solid #343844;
+  border-radius: 12px;
+  padding: 6px 12px 10px;
+  overflow-y: auto;
+  min-height: 0;
+  scrollbar-width: thin;
+}
+
+.side details {
+  border-bottom: 1px solid #2c303b;
+  padding: 2px 0 8px;
+}
+
+.side details:last-child {
+  border-bottom: 0;
+}
+
+.side summary {
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: bold;
+  padding: 8px 0 6px;
+  list-style: none;
+  user-select: none;
+}
+
+.side summary::-webkit-details-marker {
+  display: none;
+}
+
+.side summary::before {
+  content: "▾ ";
+  color: #8b7cff;
+}
+
+.side details:not([open]) summary::before {
+  content: "▸ ";
+}
+
+.control {
+  margin-bottom: 9px;
+}
+
+.control label {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: #ddd;
+  margin-bottom: 3px;
+}
+
+.control input[type="range"] {
+  width: 100%;
+  accent-color: #8b7cff;
+  margin: 0;
+  height: 16px;
+}
+
+.control select,
+.control input[type="text"],
+.control input[type="number"] {
+  width: 100%;
+  background: #111318;
+  color: white;
+  border: 1px solid #444957;
+  padding: 6px;
+  border-radius: 5px;
+  font-size: 12px;
+}
+
+.control input[type="file"] {
+  width: 100%;
+  color: #ddd;
+  font-size: 12px;
+}
+
+.color-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 10px;
+}
+
+.color-grid .control {
+  margin: 0;
+}
+
+.color-row {
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  gap: 6px;
+  align-items: center;
+}
+
+.color-row input[type="color"] {
+  width: 36px;
+  height: 28px;
+  padding: 1px;
+  border: 1px solid #555;
+  background: #222;
+  border-radius: 5px;
+}
+
+.color-row input[type="text"] {
+  padding: 5px;
+}
+
+/* Centre : aperçu + barre de boutons */
+.center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.stage {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.canvas-wrap {
+  height: 100%;
+  max-width: 100%;
+  aspect-ratio: 9 / 16;
+  background: #000;
+  overflow: hidden;
+  border-radius: 10px;
+  border: 1px solid #444;
+}
+
+canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.toolbar {
+  width: 100%;
+  max-width: 600px;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+}
+
+button {
+  border: 0;
+  border-radius: 7px;
+  padding: 10px 4px;
+  font-weight: bold;
+  font-size: 12px;
+  cursor: pointer;
+  color: white;
+  background: #6254d9;
+}
+
+button:hover {
+  filter: brightness(1.15);
+}
+
+button.secondary {
+  background: #3c414e;
+}
+
+button.shuffle {
+  background: #2f8f6b;
+}
+
+button.record {
+  background: #bd354d;
+}
+
+.options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: #ddd;
+}
+
+.options select {
+  background: #111318;
+  color: white;
+  border: 1px solid #444957;
+  padding: 4px 6px;
+  border-radius: 5px;
+  font-size: 12px;
+}
+
+.options label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status {
+  font-size: 13px;
+  color: #bbb;
+  text-align: center;
+}
+
+/* Placement explicite des 3 colonnes (ordre du HTML : centre d'abord). */
+.panels {
+  display: contents;
+}
+
+.side.left {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.center {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.side.right {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+button {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.status:empty {
+  display: none;
+}
+
+/* ============ TÉLÉPHONE / TABLETTE ============
+   Aperçu et boutons toujours visibles en haut ; les réglages défilent
+   dans une zone en dessous, un seul groupe ouvert à la fois. */
+@media (max-width: 1050px) {
+  html, body {
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
+  .app {
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 6px;
+    padding-top: max(6px, env(safe-area-inset-top));
+    padding-bottom: max(6px, env(safe-area-inset-bottom));
+    padding-left: max(6px, env(safe-area-inset-left));
+    padding-right: max(6px, env(safe-area-inset-right));
+  }
+
+  .center {
+    flex: none;
+    gap: 5px;
+  }
+
+  .stage {
+    flex: none;
+    height: 34vh;
+    height: 34dvh;
+  }
+
+  .canvas-wrap {
+    height: 100%;
+    width: auto;
+  }
+
+  .panels {
+    display: block;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+
+  .side {
+    overflow: visible;
+    margin-bottom: 8px;
+    padding: 0 12px 4px;
+  }
+
+  .side summary {
+    min-height: 46px;
+    display: flex;
+    align-items: center;
+    font-size: 15px;
+  }
+
+  .control label {
+    font-size: 14px;
+  }
+
+  .control input[type="range"] {
+    height: 34px;
+  }
+
+  /* 16 px minimum : évite le zoom automatique d'iOS dans les champs. */
+  .control select,
+  .control input[type="text"],
+  .control input[type="number"],
+  .options select {
+    font-size: 16px;
+    padding: 9px;
+  }
+
+  .color-row {
+    grid-template-columns: 44px 1fr;
+  }
+
+  .color-row input[type="color"] {
+    width: 44px;
+    height: 36px;
+  }
+
+  button {
+    min-height: 44px;
+    padding: 10px 2px;
+    font-size: 13px;
+  }
+
+  .options {
+    font-size: 13px;
+  }
+
+  .options input[type="checkbox"],
+  .control input[type="checkbox"] {
+    width: 22px;
+    height: 22px;
+  }
+
+  .status {
+    font-size: 12px;
+  }
+}
+
+/* Téléphone en mode paysage : aperçu à gauche, réglages à droite. */
+@media (max-width: 1050px) and (orientation: landscape) {
+  .app {
+    flex-direction: row;
+  }
+
+  .center {
+    flex: 0 0 46%;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .stage {
+    flex: 1;
+    height: auto;
+    min-height: 0;
+  }
+
+  .panels {
+    flex: 1;
+    min-width: 0;
+  }
+}
+</style>
+</head>
+
+<body>
+
+<div class="app">
+
+  <!-- ============ CENTRE : aperçu, boutons, options ============ -->
+  <main class="center">
+
+    <div class="stage">
+      <div class="canvas-wrap">
+        <canvas id="canvas" width="1080" height="1920"></canvas>
+      </div>
+    </div>
+
+    <div class="status" id="counter">600 cercles restants</div>
+
+    <div class="toolbar">
+      <button id="startBtn">Démarrer</button>
+      <button id="pauseBtn" class="secondary">Pause</button>
+      <button id="resetBtn" class="secondary">Réinitialiser</button>
+      <button id="shuffleBtn" class="shuffle" title="Nouvelle disposition aléatoire des trous">🎲 Mélanger</button>
+      <button id="recordBtn" class="record">Enregistrer</button>
+    </div>
+
+    <div class="options">
+      <label>Qualité (aperçu et vidéo)
+        <select id="quality">
+          <option value="0.5">50 % : 540×960</option>
+          <option value="0.75" selected>75 % : 810×1440</option>
+          <option value="1">100 % : 1080×1920</option>
+        </select>
+      </label>
+      <label><input id="effects" type="checkbox" checked> Effets</label>
+      <label><input id="useGPU" type="checkbox" checked> GPU (WebGL)</label>
+      <button id="shareBtn" class="secondary" hidden>📤 Partager la vidéo</button>
+    </div>
+
+    <div class="status" id="gpuInfo"></div>
+    <div class="status" id="status">Prêt à démarrer</div>
+
+  </main>
+
+  <div class="panels">
+
+  <!-- ============ GAUCHE : cercles et trous ============ -->
+  <aside class="side left">
+
+    <details open>
+      <summary>Cercles</summary>
+
+      <div class="control">
+        <label>Nombre de cercles <span id="countValue">600</span></label>
+        <input id="count" type="range" min="10" max="3000" value="600">
+      </div>
+
+      <div class="control">
+        <label>Espacement <span id="spacingValue">7</span></label>
+        <input id="spacing" type="range" min="3" max="30" value="7">
+      </div>
+
+      <div class="control">
+        <label>Épaisseur des traits <span id="strokeValue">3</span></label>
+        <input id="stroke" type="range" min="1" max="12" value="3">
+      </div>
+
+      <div class="control">
+        <label>Rayon du cercle central <span id="centerRadiusValue">235</span></label>
+        <input id="centerRadius" type="range" min="80" max="450" value="235">
+      </div>
+
+      <div class="control">
+        <label>Zoom <span id="zoomValue">1.0</span></label>
+        <input id="zoom" type="range" min="0.4" max="2" step="0.05" value="1">
+      </div>
+    </details>
+
+    <details open>
+      <summary>Trous</summary>
+
+      <div class="control">
+        <label>Largeur du trou <span id="gapValue">90°</span></label>
+        <input id="gap" type="range" min="8" max="100" value="90">
+      </div>
+
+      <div class="control">
+        <label>Paquet : cercles minimum <span id="groupMinValue">15</span></label>
+        <input id="groupMin" type="range" min="1" max="100" value="15">
+      </div>
+
+      <div class="control">
+        <label>Paquet : cercles maximum <span id="groupMaxValue">45</span></label>
+        <input id="groupMax" type="range" min="1" max="100" value="45">
+      </div>
+
+      <div class="control">
+        <label>Dérive des trous <span id="driftValue">0.4°</span></label>
+        <input id="drift" type="range" min="-2" max="2" step="0.05" value="0.4">
+      </div>
+
+      <div class="control">
+        <label>Irrégularité des bords <span id="jitterValue">2°</span></label>
+        <input id="jitter" type="range" min="0" max="10" step="0.5" value="2">
+      </div>
+
+      <div class="control">
+        <label>Rotation des trous <span id="rotationValue">8°/s</span></label>
+        <input id="rotation" type="range" min="-90" max="90" value="8">
+      </div>
+
+      <div class="control">
+        <label>Sens de rotation (par paquet)</label>
+        <select id="directionMode">
+          <option value="random" selected>Aléatoire (chaque paquet)</option>
+          <option value="alternate">Alterné (horaire / antihoraire)</option>
+          <option value="same">Tous dans le même sens</option>
+        </select>
+      </div>
+
+      <div class="control">
+        <label>Angle initial <span id="offsetValue">0°</span></label>
+        <input id="offset" type="range" min="0" max="359" value="0">
+      </div>
+    </details>
+
+  </aside>
+
+  <!-- ============ DROITE : balle, couleurs, musique ============ -->
+  <aside class="side right">
+
+    <details open>
+      <summary>Balle et durée</summary>
+
+      <div class="control">
+        <label>Taille de la balle <span id="ballSizeValue">10</span></label>
+        <input id="ballSize" type="range" min="4" max="45" value="10">
+      </div>
+
+      <div class="control">
+        <label>Vitesse <span id="speedValue">600</span></label>
+        <input id="speed" type="range" min="50" max="900" value="600">
+      </div>
+
+      <div class="control">
+        <label>Durée maximale (secondes) <span id="durationValue">90</span></label>
+        <input id="duration" type="range" min="5" max="300" value="90">
+      </div>
+    </details>
+
+    <details open>
+      <summary>Couleurs</summary>
+
+      <div class="control">
+        <label>Couleur des cercles</label>
+        <select id="colorMode">
+          <option value="gradient" selected>Dégradé (proche → loin)</option>
+          <option value="single">Couleur unique</option>
+        </select>
+      </div>
+
+      <div class="color-grid">
+        <div class="control">
+          <label>Fond</label>
+          <div class="color-row">
+            <input id="bgColor" type="color" value="#060a1a">
+            <input id="bgHex" type="text" value="#060a1a">
+          </div>
+        </div>
+
+        <div class="control">
+          <label>Cercle actif</label>
+          <div class="color-row">
+            <input id="activeColor" type="color" value="#ffffff">
+            <input id="activeHex" type="text" value="#ffffff">
+          </div>
+        </div>
+
+        <div class="control">
+          <label>Balle</label>
+          <div class="color-row">
+            <input id="ballColor" type="color" value="#ffd45a">
+            <input id="ballHex" type="text" value="#ffd45a">
+          </div>
+        </div>
+
+        <div class="control">
+          <label>Glow</label>
+          <div class="color-row">
+            <input id="glowColor" type="color" value="#9db8ff">
+            <input id="glowHex" type="text" value="#9db8ff">
+          </div>
+        </div>
+
+        <div class="control">
+          <label>Dégradé : proches</label>
+          <div class="color-row">
+            <input id="gradNear" type="color" value="#f5b13d">
+            <input id="gradNearHex" type="text" value="#f5b13d">
+          </div>
+        </div>
+
+        <div class="control">
+          <label>Dégradé : milieu</label>
+          <div class="color-row">
+            <input id="gradMid" type="color" value="#dfe7f7">
+            <input id="gradMidHex" type="text" value="#dfe7f7">
+          </div>
+        </div>
+
+        <div class="control">
+          <label>Dégradé : loin</label>
+          <div class="color-row">
+            <input id="gradFar" type="color" value="#3d5fc8">
+            <input id="gradFarHex" type="text" value="#3d5fc8">
+          </div>
+        </div>
+
+        <div class="control">
+          <label>Couleur unique</label>
+          <div class="color-row">
+            <input id="ringColor" type="color" value="#ffffff">
+            <input id="ringHex" type="text" value="#ffffff">
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <details open>
+      <summary>Musique</summary>
+
+      <div class="control">
+        <label>Fichier audio (MP3, WAV, M4A…)</label>
+        <input id="musicFile" type="file" accept="audio/*,.mp3">
+        <div class="status" id="musicStatus" style="text-align:left; margin-top:4px;">Aucune musique chargée</div>
+      </div>
+
+      <div class="control">
+        <label>Volume <span id="musicVolumeValue">80%</span></label>
+        <input id="musicVolume" type="range" min="0" max="100" value="80">
+      </div>
+
+      <div class="control">
+        <label>Volume quand étouffé <span id="muffleVolumeValue">55%</span></label>
+        <input id="muffleVolume" type="range" min="0" max="100" value="55">
+      </div>
+
+      <div class="control">
+        <label>Étouffement : fréquence <span id="muffleFreqValue">500 Hz</span></label>
+        <input id="muffleFreq" type="range" min="150" max="3000" step="10" value="500">
+      </div>
+
+      <div class="control">
+        <label>Début dans la musique (secondes)</label>
+        <input id="musicOffset" type="number" min="0" step="0.5" value="0">
+      </div>
+
+      <div class="control">
+        <label>Décalage du son dans la vidéo <span id="avOffsetValue">0 ms</span></label>
+        <input id="avOffset" type="range" min="-300" max="300" step="10" value="0">
+      </div>
+
+      <div class="control">
+        <label><span>Boucler la musique</span><input id="musicLoop" type="checkbox" checked></label>
+      </div>
+    </details>
+
+  </aside>
+
+  </div>
+
+</div>
+
+<script>
+"use strict";
+
+// ======================================
+// CANVAS
+// ======================================
+
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+// Dimensions logiques de la vidéo (toujours 1080 x 1920).
+// La résolution réelle du canvas peut être plus basse pour l'aperçu.
+const W = 1080;
+const H = 1920;
+const CX = W / 2;
+const CY = H / 2;
+
+const TAU = Math.PI * 2;
+const DEG = Math.PI / 180;
+
+// ======================================
+// PARAMÈTRES
+// ======================================
+
+const cfg = {
+  count: 600,
+  ballSize: 10,
+  speed: 600,
+  gap: 90,
+  spacing: 7,
+  stroke: 3,
+  rotation: 8,
+  directionMode: "random",
+  groupMin: 15,
+  groupMax: 45,
+  centerRadius: 235,
+  drift: 0.4,
+  jitter: 2,
+  offset: 0,
+  zoom: 1,
+  duration: 90,
+
+  musicVolume: 80,
+  muffleVolume: 55,
+  muffleFreq: 500,
+  musicOffset: 0,
+  musicLoop: true,
+  avOffset: 0,
+
+  effects: true,
+  useGPU: true,
+
+  colorMode: "gradient",
+  gradNear: "#f5b13d",
+  gradMid: "#dfe7f7",
+  gradFar: "#3d5fc8",
+
+  bgColor: "#060a1a",
+  ringColor: "#ffffff",
+  activeColor: "#ffffff",
+  ballColor: "#ffd45a",
+  glowColor: "#9db8ff"
+};
+
+// ======================================
+// ÉTAT DE L'ANIMATION
+// ======================================
+
+let running = false;
+let paused = false;
+let finished = false;
+
+let level = 0;
+let elapsed = 0;
+let lastTime = 0;
+
+let ball = {
+  x: 0,
+  y: 0,
+  vx: 260,
+  vy: -250,
+  r: cfg.ballSize
+};
+
+let ringOffsets = [];
+let ringDirections = [];
+let ringGroups = [];
+let groupDirections = [];
+let ringLocal = [];
+let ringJitter = [];
+let ringDataVersion = 0;
+let shift = 0;
+let shiftVel = 0;
+let crossFlash = 0;
+let lastDrawTime = 0;
+let renderScale = 0.75;   // résolution actuelle du canvas
+let previewScale = 0.75;  // choix de l'utilisateur pour l'aperçu
+const stars = [];
+let starLevels = null;
+
+let animationFrame = null;
+
+let recorder = null;
+let recordedChunks = [];
+let recording = false;
+
+// ======================================
+// OUTILS
+// ======================================
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function random(min, max) {
+  return min + Math.random() * (max - min);
+}
+
+function normalizeAngle(angle) {
+  return ((angle % TAU) + TAU) % TAU;
+}
+
+function angleDifference(a, b) {
+  return Math.atan2(Math.sin(a - b), Math.cos(a - b));
+}
+
+// Rayon "physique" : l'anneau actif est toujours au rayon central,
+// les suivants sont espacés vers l'extérieur (effet de zoom infini).
+function baseRadius(index) {
+  return (cfg.centerRadius + (index - level) * cfg.spacing) * cfg.zoom;
+}
+
+// Rayon affiché : même chose + petit décalage qui se résorbe
+// après chaque franchissement pour un zoom fluide.
+function ringRadius(index) {
+  return baseRadius(index) + shift;
+}
+
+function gapAngleForRing(index, time = elapsed) {
+  return (
+    cfg.offset * DEG +
+    ringOffsets[index] +
+    (ringLocal[index] || 0) * cfg.drift * DEG +
+    (ringJitter[index] || 0) * cfg.jitter * DEG +
+    (ringDirections[index] || 1) * cfg.rotation * DEG * time
+  );
+}
+
+// ======================================
+// ANGLES ALÉATOIRES DES TROUS
+// ======================================
+
+function generateRingOffsets() {
+  ringOffsets = new Array(cfg.count);
+  ringGroups = new Array(cfg.count);
+  ringLocal = new Array(cfg.count);
+  ringJitter = new Array(cfg.count);
+
+  const lo = Math.min(cfg.groupMin, cfg.groupMax);
+  const hi = Math.max(cfg.groupMin, cfg.groupMax);
+
+  let i = 0;
+  let group = 0;
+
+  // Paquets de taille aléatoire (entre min et max). Les cercles d'un
+  // paquet partagent le même angle de base ; la dérive (par numéro dans
+  // le paquet) et l'irrégularité (aléa par cercle) donnent les bords
+  // en escalier / en spirale.
+  while (i < cfg.count) {
+    const size = Math.floor(random(lo, hi + 1));
+    const groupOffset = Math.random() * TAU;
+
+    for (let k = 0; k < size && i < cfg.count; k++, i++) {
+      ringOffsets[i] = groupOffset;
+      ringGroups[i] = group;
+      ringLocal[i] = k;
+      ringJitter[i] = Math.random() * 2 - 1;
+    }
+
+    group++;
+  }
+
+  generateRingDirections();
+}
+
+function generateStars() {
+  stars.length = 0;
+
+  for (let i = 0; i < 260; i++) {
+    const angle = Math.random() * TAU;
+    const dist = Math.sqrt(Math.random());
+
+    stars.push({
+      ux: Math.cos(angle) * dist,
+      uy: Math.sin(angle) * dist,
+      size: random(1.2, 2.6),
+      speed: random(0.8, 3),
+      phase: Math.random() * TAU
+    });
+  }
+
+  starLevels = new Uint8Array(stars.length);
+}
+
+// ======================================
+// SENS DE ROTATION DE CHAQUE PAQUET
+// +1 = horaire, -1 = antihoraire
+// Un paquet tourne d'un seul bloc : même sens pour tous
+// ses cercles, sinon les trous se désaligneraient.
+// ======================================
+
+function generateRingDirections() {
+  const groupCount = (ringGroups[cfg.count - 1] || 0) + 1;
+
+  groupDirections = new Array(groupCount);
+
+  for (let g = 0; g < groupCount; g++) {
+    if (cfg.directionMode === "same") {
+      groupDirections[g] = 1;
+    } else if (cfg.directionMode === "alternate") {
+      groupDirections[g] = g % 2 === 0 ? 1 : -1;
+    } else {
+      groupDirections[g] = Math.random() < 0.5 ? 1 : -1;
+    }
+  }
+
+  ringDirections = new Array(cfg.count);
+
+  for (let i = 0; i < cfg.count; i++) {
+    ringDirections[i] = groupDirections[ringGroups[i]];
+  }
+
+  ringDataVersion++;
+}
+
+// ======================================
+// INITIALISATION
+// ======================================
+
+function resetSimulation() {
+  running = false;
+  paused = false;
+  finished = false;
+
+  level = 0;
+  elapsed = 0;
+  shift = 0;
+  shiftVel = 0;
+  crossFlash = 0;
+  trailCount = 0;
+  spLife.fill(0);
+
+  ball.r = cfg.ballSize;
+
+  const initialAngle = random(0, TAU);
+  const initialDirection = random(0, TAU);
+
+  ball.x = 0;
+  ball.y = 0;
+
+  ball.vx = Math.cos(initialDirection) * cfg.speed;
+  ball.vy = Math.sin(initialDirection) * cfg.speed;
+
+  generateRingOffsets();
+
+  clearTimeout(leadTimer);
+  leadTimer = null;
+  keepAwake(false);
+
+  stopMusic();
+  musicClear = false;
+
+  if (recorder && recorder.state !== "inactive") {
+    recorder.stop();
+  }
+
+  updateStatus("Prêt à démarrer");
+  updateCounter();
+  draw();
+}
+
+// ======================================
+// COLLISION AVEC UN ANNEAU
+// ======================================
+
+function handleCrossing(index) {
+  const radius = baseRadius(index);
+
+  const distance = Math.hypot(ball.x, ball.y);
+
+  if (distance === 0) return false;
+
+  const angle = Math.atan2(ball.y, ball.x);
+  const holeAngle = gapAngleForRing(index);
+
+  const difference = Math.abs(
+    angleDifference(angle, holeAngle)
+  );
+
+  // Taille angulaire de la balle vue depuis le centre.
+  const ballAngular = Math.asin(
+    clamp(ball.r / radius, 0, 0.95)
+  );
+
+  const halfGap = cfg.gap * DEG / 2;
+
+  // Petite marge de sécurité pour éviter les collisions limites.
+  const usableHalfGap = halfGap - ballAngular;
+
+  const passed =
+    usableHalfGap > 0 &&
+    difference < usableHalfGap;
+
+  const nx = ball.x / distance;
+  const ny = ball.y / distance;
+
+  if (passed) {
+    // La balle franchit le trou.
+    level++;
+    setMusicClear(true);
+
+    // Le zoom "avance" d'un anneau : la balle se retrouve juste à
+    // l'intérieur du nouvel anneau actif. Le décalage visuel (shift)
+    // rend la transition fluide.
+    const stepPx = cfg.spacing * cfg.zoom;
+    const safeDistance = Math.max(
+      0.5,
+      radius + Math.max(0.5, cfg.spacing * 0.08) - stepPx
+    );
+
+    shift += stepPx;
+
+    crossFlash = 1;
+    spawnSparks(nx * (radius + shift), ny * (radius + shift), nx, ny);
+
+    ball.x = nx * safeDistance;
+    ball.y = ny * safeDistance;
+
+    updateCounter();
+
+    if (level >= cfg.count) {
+      finishSimulation();
+    }
+
+    return true;
+  }
+
+  // Collision : le son devient étouffé.
+  setMusicClear(false);
+
+  // Réflexion de la vitesse.
+  const dot = ball.vx * nx + ball.vy * ny;
+
+  if (dot > 0) {
+    ball.vx -= 2 * dot * nx;
+    ball.vy -= 2 * dot * ny;
+  }
+
+  // Variation aléatoire modérée de la direction.
+  const speed = Math.hypot(ball.vx, ball.vy);
+  const variation = random(-20, 20) * DEG;
+
+  const currentAngle = Math.atan2(ball.vy, ball.vx);
+  const newAngle = currentAngle + variation;
+
+  ball.vx = Math.cos(newAngle) * speed;
+  ball.vy = Math.sin(newAngle) * speed;
+
+  // Replacer légèrement la balle à l'intérieur.
+  const safeDistance = radius - Math.max(0.5, cfg.spacing * 0.08);
+
+  ball.x = nx * safeDistance;
+  ball.y = ny * safeDistance;
+
+  return false;
+}
+
+// ======================================
+// PHYSIQUE
+// ======================================
+
+function updatePhysics(dt) {
+  const distanceToTravel = cfg.speed * dt;
+
+  const maxStep = Math.max(
+    0.35,
+    Math.min(2, cfg.spacing * cfg.zoom * 0.35)
+  );
+
+  const steps = Math.max(
+    1,
+    Math.ceil(distanceToTravel / maxStep)
+  );
+
+  const stepDt = dt / steps;
+
+  for (let i = 0; i < steps; i++) {
+    if (level >= cfg.count) break;
+
+    const activeRadius = baseRadius(level);
+
+    let oldDistance = Math.hypot(ball.x, ball.y);
+
+    // Sécurité : la balle reste toujours à l'intérieur de l'anneau actif.
+    if (oldDistance >= activeRadius) {
+      const k = (activeRadius - 1) / oldDistance;
+      ball.x *= k;
+      ball.y *= k;
+      oldDistance = activeRadius - 1;
+    }
+
+    ball.x += ball.vx * stepDt;
+    ball.y += ball.vy * stepDt;
+
+    const newDistance = Math.hypot(ball.x, ball.y);
+
+    // Détection du franchissement vers l'extérieur.
+    if (
+      oldDistance < activeRadius &&
+      newDistance >= activeRadius
+    ) {
+      handleCrossing(level);
+    }
+
+    // Vitesse constante.
+    const speed = Math.hypot(ball.vx, ball.vy);
+
+    if (speed > 0) {
+      ball.vx = ball.vx / speed * cfg.speed;
+      ball.vy = ball.vy / speed * cfg.speed;
+    }
+  }
+}
+
+// ======================================
+// COULEURS
+// ======================================
+
+function hexToRgb(hex) {
+  const v = parseInt(hex.slice(1), 16);
+  return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+}
+
+function mixHex(a, b, t) {
+  const A = hexToRgb(a);
+  const B = hexToRgb(b);
+
+  const r = Math.round(A[0] + (B[0] - A[0]) * t);
+  const g = Math.round(A[1] + (B[1] - A[1]) * t);
+  const bl = Math.round(A[2] + (B[2] - A[2]) * t);
+
+  return "rgb(" + r + "," + g + "," + bl + ")";
+}
+
+function rgba(hex, alpha) {
+  const c = hexToRgb(hex);
+  return "rgba(" + c[0] + "," + c[1] + "," + c[2] + "," + alpha + ")";
+}
+
+// t = 0 : cercle juste après l'anneau actif, t = 1 : bord de l'écran.
+function gradientColor(t) {
+  if (t < 0.5) return mixHex(cfg.gradNear, cfg.gradMid, t / 0.5);
+  return mixHex(cfg.gradMid, cfg.gradFar, (t - 0.5) / 0.5);
+}
+
+// Table de 256 couleurs, recalculée seulement si le dégradé change.
+const COLOR_STEPS = 256;
+const RING_CHUNK = 6;   // anneaux par tracé (compromis vitesse / finesse)
+let colorTableKey = "";
+let colorTable = [];
+
+function getColorTable() {
+  const key = cfg.gradNear + cfg.gradMid + cfg.gradFar;
+
+  if (key !== colorTableKey) {
+    colorTableKey = key;
+    colorTable = [];
+
+    for (let c = 0; c < COLOR_STEPS; c++) {
+      colorTable.push(gradientColor((c + 0.5) / COLOR_STEPS));
+    }
+  }
+
+  return colorTable;
+}
+
+// ======================================
+// ÉLAGAGE : on ne trace que la partie visible de chaque anneau
+// ======================================
+
+const visBuf = new Float64Array(32);
+const ptsBuf = new Float64Array(12);
+let visCount = 0;
+
+// Remplit visBuf avec les intervalles d'angles [début, fin] (dans [0, TAU])
+// où le cercle de rayon R se trouve à l'intérieur de l'écran.
+function computeVisible(R) {
+  const m = cfg.stroke * 2 + 2;
+  const hx = W / 2 + m;
+  const hy = H / 2 + m;
+
+  visCount = 0;
+
+  if (R <= Math.min(hx, hy)) {
+    visBuf[0] = 0;
+    visBuf[1] = TAU;
+    visCount = 1;
+    return;
+  }
+
+  if (R >= Math.hypot(hx, hy)) return;
+
+  // Tableau préalloué + tri par insertion : aucune allocation par image
+  // (moins de ramasse-miettes, donc moins de micro-saccades).
+  let n = 0;
+
+  ptsBuf[n++] = 0;
+  ptsBuf[n++] = TAU;
+
+  if (R > hx) {
+    const a = Math.acos(hx / R);
+    ptsBuf[n++] = a;
+    ptsBuf[n++] = Math.PI - a;
+    ptsBuf[n++] = Math.PI + a;
+    ptsBuf[n++] = TAU - a;
+  }
+
+  if (R > hy) {
+    const b = Math.asin(hy / R);
+    ptsBuf[n++] = b;
+    ptsBuf[n++] = Math.PI - b;
+    ptsBuf[n++] = Math.PI + b;
+    ptsBuf[n++] = TAU - b;
+  }
+
+  for (let i = 1; i < n; i++) {
+    const v = ptsBuf[i];
+    let j = i - 1;
+
+    while (j >= 0 && ptsBuf[j] > v) {
+      ptsBuf[j + 1] = ptsBuf[j];
+      j--;
+    }
+
+    ptsBuf[j + 1] = v;
+  }
+
+  for (let i = 0; i < n - 1; i++) {
+    const p = ptsBuf[i];
+    const q = ptsBuf[i + 1];
+
+    if (q - p < 1e-9) continue;
+
+    const mid = (p + q) / 2;
+
+    if (
+      Math.abs(R * Math.cos(mid)) <= hx &&
+      Math.abs(R * Math.sin(mid)) <= hy
+    ) {
+      if (visCount > 0 && Math.abs(visBuf[2 * visCount - 1] - p) < 1e-9) {
+        visBuf[2 * visCount - 1] = q;
+      } else {
+        visBuf[2 * visCount] = p;
+        visBuf[2 * visCount + 1] = q;
+        visCount++;
+      }
+    }
+  }
+}
+
+// Ajoute au tracé courant l'arc [startAngle, endAngle] du cercle de
+// rayon R, limité à la partie visible. Chaque morceau démarre par un
+// moveTo : aucun trait parasite ne relie les morceaux.
+function addArcCulled(R, startAngle, endAngle) {
+  let added = 0;
+  const length = endAngle - startAngle;
+  const s0 = normalizeAngle(startAngle);
+  const e0 = s0 + length;
+
+  computeVisible(R);
+
+  for (let v = 0; v < visCount; v++) {
+    const p = visBuf[2 * v];
+    const q = visBuf[2 * v + 1];
+
+    // Deux copies de l'arc : l'une telle quelle, l'autre décalée d'un
+    // tour pour gérer le passage par 0.
+    for (let turn = 0; turn < 2; turn++) {
+      const off = turn * TAU;
+      const lo = Math.max(s0 - off, p);
+      const hi = Math.min(e0 - off, q);
+
+      if (hi > lo) {
+        ctx.moveTo(CX + R * Math.cos(lo), CY + R * Math.sin(lo));
+        ctx.arc(CX, CY, R, lo, hi, false);
+        added++;
+      }
+    }
+  }
+
+  return added;
+}
+
+// ======================================
+// RÉSOLUTION DU CANVAS
+// ======================================
+
+// Résolution réelle du canvas : elle sert à la fois pour l'aperçu et
+// pour la vidéo enregistrée. Tout le code de dessin garde les coordonnées 1080 x 1920 ;
+// c'est draw() qui applique l'échelle.
+function setRenderScale(scale) {
+  applyScale(scale);
+  draw();
+}
+
+function applyScale(scale) {
+  if (scale === renderScale && canvas.width === Math.round(W * scale)) return;
+
+  renderScale = scale;
+
+  canvas.width = Math.round(W * scale);
+  canvas.height = Math.round(H * scale);
+
+  bgCanvas = null;
+}
+
+// Mesure le temps de dessin moyen. Si l'aperçu devient trop lent
+// (on vise moins de 16 ms par image), la résolution d'aperçu baisse
+// automatiquement. Pendant un enregistrement, la résolution ne change jamais.
+let drawTimeAvg = 0;
+
+function adaptPreviewQuality(ms) {
+  drawTimeAvg = drawTimeAvg === 0 ? ms : drawTimeAvg * 0.9 + ms * 0.1;
+
+  if (recording) return;
+
+  if (drawTimeAvg > 18 && renderScale > 0.5) {
+    applyScale(Math.max(0.5, renderScale - 0.125));
+    drawTimeAvg = 0;
+  }
+}
+
+// ======================================
+// FOND (dessiné une seule fois, puis recopié)
+// ======================================
+
+let bgCanvas = null;
+let bgKey = "";
+
+function drawBackground() {
+  if (!bgCanvas || bgKey !== cfg.bgColor) {
+    bgKey = cfg.bgColor;
+
+    bgCanvas = document.createElement("canvas");
+    bgCanvas.width = canvas.width;
+    bgCanvas.height = canvas.height;
+
+    const bctx = bgCanvas.getContext("2d");
+    bctx.setTransform(renderScale, 0, 0, renderScale, 0, 0);
+
+    const g = bctx.createLinearGradient(0, 0, 0, H);
+
+    g.addColorStop(0, cfg.bgColor);
+    g.addColorStop(1, mixHex(cfg.bgColor, "#1b2f7a", 0.45));
+
+    bctx.fillStyle = g;
+    bctx.fillRect(0, 0, W, H);
+  }
+
+  // Copie pixel pour pixel (sans l'échelle), puis on remet l'échelle.
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(bgCanvas, 0, 0);
+  ctx.setTransform(renderScale, 0, 0, renderScale, 0, 0);
+}
+
+// ======================================
+// DESSIN DES ANNEAUX
+// ======================================
+
+function drawRing(index, active = false) {
+  const radius = ringRadius(index);
+
+  const holeAngle = gapAngleForRing(index);
+  const halfGap = cfg.gap * DEG / 2;
+
+  const startAngle = holeAngle + halfGap;
+  const endAngle = holeAngle + TAU - halfGap;
+
+  ctx.beginPath();
+
+  // Nouveau sous-chemin : aucun trait ne relie les extrémités.
+  ctx.moveTo(
+    CX + radius * Math.cos(startAngle),
+    CY + radius * Math.sin(startAngle)
+  );
+
+  ctx.arc(CX, CY, radius, startAngle, endAngle, false);
+
+  ctx.lineCap = "butt";
+
+  if (active) {
+    // Le flash éclaire l'anneau juste après chaque franchissement.
+    const flash = cfg.effects ? crossFlash : 0;
+    const boost = 1 + 1.6 * flash;
+    const core = cfg.stroke * 1.6 + 1 + 1.5 * flash;
+
+    // Glow : traits larges et transparents superposés. Beaucoup plus
+    // rapide que shadowBlur sur un anneau aussi grand.
+    ctx.strokeStyle = cfg.glowColor;
+
+    ctx.globalAlpha = Math.min(1, 0.05 * boost);
+    ctx.lineWidth = core + 30;
+    ctx.stroke();
+
+    ctx.globalAlpha = Math.min(1, 0.07 * boost);
+    ctx.lineWidth = core + 20;
+    ctx.stroke();
+
+    ctx.globalAlpha = Math.min(1, 0.10 * boost);
+    ctx.lineWidth = core + 12;
+    ctx.stroke();
+
+    ctx.globalAlpha = Math.min(1, 0.16 * boost);
+    ctx.lineWidth = core + 6;
+    ctx.stroke();
+
+    ctx.globalAlpha = Math.min(1, 0.25 * boost);
+    ctx.lineWidth = core + 2.5;
+    ctx.stroke();
+
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = cfg.activeColor;
+    ctx.lineWidth = core;
+    ctx.stroke();
+  } else {
+    ctx.lineWidth = cfg.stroke;
+    ctx.strokeStyle = cfg.ringColor;
+    ctx.stroke();
+  }
+}
+
+// ======================================
+// DISQUE CENTRAL + ÉTOILES + COMPTEUR
+// ======================================
+
+const STAR_ALPHAS = [0.3, 0.5, 0.75, 1];
+
+function drawCenter() {
+  const R = cfg.centerRadius * cfg.zoom + shift;
+
+  const g = ctx.createRadialGradient(CX, CY, 0, CX, CY, R);
+  g.addColorStop(0, "#02030a");
+  g.addColorStop(1, "#080c1c");
+
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(CX, CY, R, 0, TAU);
+  ctx.fill();
+
+  // Scintillement : chaque étoile est rangée dans l'un des 4 niveaux
+  // de luminosité, puis chaque niveau est dessiné en un seul tracé.
+  for (let i = 0; i < stars.length; i++) {
+    const st = stars[i];
+    const a = 0.25 + 0.75 * Math.abs(Math.sin(elapsed * st.speed + st.phase));
+    starLevels[i] = Math.min(3, Math.floor(a * 4));
+  }
+
+  const scale = R * 0.96;
+
+  ctx.fillStyle = "#ffffff";
+
+  for (let level = 0; level < 4; level++) {
+    ctx.globalAlpha = STAR_ALPHAS[level];
+    ctx.beginPath();
+
+    for (let i = 0; i < stars.length; i++) {
+      if (starLevels[i] !== level) continue;
+
+      const st = stars[i];
+      ctx.rect(CX + st.ux * scale, CY + st.uy * scale, st.size, st.size);
+    }
+
+    ctx.fill();
+  }
+
+  ctx.globalAlpha = 1;
+}
+
+function drawCounter() {
+  const remaining = Math.max(0, cfg.count - level);
+  const fontSize = Math.round(cfg.centerRadius * cfg.zoom * 0.42);
+
+  ctx.save();
+
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = "bold " + fontSize + "px Arial";
+  ctx.shadowColor = "rgba(0,0,0,0.6)";
+  ctx.shadowBlur = 12;
+  ctx.fillStyle = "rgba(255,255,255,0.97)";
+
+  // Petite pulsation à chaque cercle franchi.
+  const pop = cfg.effects ? 1 + 0.07 * crossFlash : 1;
+
+  ctx.translate(CX, CY);
+  ctx.scale(pop, pop);
+  ctx.fillText(remaining.toString(), 0, fontSize * 0.04);
+
+  ctx.restore();
+}
+
+// ======================================
+// DESSIN DE LA BALLE
+// ======================================
+
+let haloKey = "";
+let haloStops = [];
+
+function drawBall() {
+  computeBallVisual();
+
+  const x = CX + bvx;
+  const y = CY + bvy;
+
+  // Halo : dégradé radial (au lieu de shadowBlur, plus lent).
+  const haloRadius = ball.r * 3.4;
+  const halo = ctx.createRadialGradient(x, y, 0, x, y, haloRadius);
+
+  if (haloKey !== cfg.ballColor) {
+    haloKey = cfg.ballColor;
+    haloStops = [
+      rgba(cfg.ballColor, 0.55),
+      rgba(cfg.ballColor, 0.22),
+      rgba(cfg.ballColor, 0)
+    ];
+  }
+
+  halo.addColorStop(0, haloStops[0]);
+  halo.addColorStop(0.35, haloStops[1]);
+  halo.addColorStop(1, haloStops[2]);
+
+  ctx.fillStyle = halo;
+  ctx.beginPath();
+  ctx.arc(x, y, haloRadius, 0, TAU);
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.arc(x, y, ball.r, 0, TAU);
+  ctx.fillStyle = cfg.ballColor;
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.arc(
+    x - ball.r * 0.28,
+    y - ball.r * 0.28,
+    ball.r * 0.22,
+    0,
+    TAU
+  );
+  ctx.fillStyle = "rgba(255,255,255,0.65)";
+  ctx.fill();
+}
+
+// ======================================
+// RENDU GPU (WebGL) : fond + anneaux
+// ======================================
+//
+// Chaque pixel est calculé par la carte graphique : il trouve l'anneau le
+// plus proche, regarde si le pixel tombe dans le trou de cet anneau, puis
+// choisit la couleur. Aucun arc n'est tracé par le processeur.
+// Les angles de base des trous sont envoyés dans une petite texture.
+
+const VERT_SRC = `
+attribute vec2 aPos;
+void main() {
+  gl_Position = vec4(aPos, 0.0, 1.0);
+}
+`;
+
+const FRAG_SRC = `
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
+
+uniform vec2 uCanvas;     // taille du canvas en pixels
+uniform float uScale;     // pixels par unité logique
+uniform vec2 uCenter;     // centre (logique)
+uniform float uH;         // hauteur logique (dégradé du fond)
+uniform float uLevel;
+uniform float uShift;
+uniform float uR0;
+uniform float uSp;
+uniform float uStroke;
+uniform float uHalfGap;
+uniform float uTime;
+uniform float uRot;
+uniform float uOffset;
+uniform float uCount;
+uniform float uFullSpan;
+uniform float uGradient;
+uniform vec3 uNear;
+uniform vec3 uMid;
+uniform vec3 uFar;
+uniform vec3 uSingle;
+uniform vec3 uBgTop;
+uniform vec3 uBgBottom;
+uniform vec2 uDataSize;
+uniform sampler2D uData;
+
+const float PI = 3.14159265359;
+const float TAU = 6.28318530718;
+
+void main() {
+  // Pixel courant, origine en haut à gauche, puis coordonnées logiques.
+  vec2 frag = vec2(gl_FragCoord.x, uCanvas.y - gl_FragCoord.y);
+  vec2 p = frag / uScale;
+  vec2 d = p - uCenter;
+
+  float r = length(d);
+  float theta = atan(d.y, d.x);
+
+  vec3 col = mix(uBgTop, uBgBottom, clamp(p.y / uH, 0.0, 1.0));
+
+  // Anneau le plus proche (indice flottant) et ses deux voisins.
+  float k = (r - uShift - uR0) / uSp + uLevel;
+  float i0 = floor(k + 0.5);
+
+  for (int j = -1; j <= 1; j++) {
+    float i = i0 + float(j);
+
+    if (i <= uLevel || i >= uCount) continue;
+
+    float ringR = uR0 + (i - uLevel) * uSp + uShift;
+    float dpx = abs(r - ringR) * uScale;
+    float cov = clamp(uStroke * uScale * 0.5 + 0.5 - dpx, 0.0, 1.0);
+
+    if (cov <= 0.0) continue;
+
+    // Données de l'anneau : angle de base (16 bits) + sens de rotation.
+    vec4 dat = texture2D(
+      uData,
+      vec2(
+        (mod(i, uDataSize.x) + 0.5) / uDataSize.x,
+        (floor(i / uDataSize.x) + 0.5) / uDataSize.y
+      )
+    );
+
+    float hi = floor(dat.r * 255.0 + 0.5);
+    float lo = floor(dat.g * 255.0 + 0.5);
+    float base = (hi * 256.0 + lo) / 65535.0 * TAU;
+    float dir = dat.b > 0.5 ? 1.0 : -1.0;
+
+    float hole = base + dir * uRot * uTime + uOffset;
+    float a = mod(theta - hole + PI, TAU) - PI;
+
+    // Bord du trou : coupe radiale, adoucie sur environ 1 pixel.
+    float edge = (abs(a) - uHalfGap) * r * uScale;
+    cov *= clamp(edge + 0.5, 0.0, 1.0);
+
+    if (cov <= 0.0) continue;
+
+    float t = clamp((i - uLevel) / uFullSpan, 0.0, 1.0);
+    vec3 rc = uSingle;
+
+    if (uGradient > 0.5) {
+      rc = t < 0.5
+        ? mix(uNear, uMid, t * 2.0)
+        : mix(uMid, uFar, (t - 0.5) * 2.0);
+    }
+
+    col = mix(col, rc, cov);
+  }
+
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+const GL_UNIFORMS = [
+  "uCanvas", "uScale", "uCenter", "uH", "uLevel", "uShift", "uR0", "uSp",
+  "uStroke", "uHalfGap", "uTime", "uRot", "uOffset", "uCount", "uFullSpan",
+  "uGradient", "uNear", "uMid", "uFar", "uSingle", "uBgTop", "uBgBottom",
+  "uDataSize", "uData"
+];
+
+const DATA_TEX_WIDTH = 1024;
+
+let glRing = null;
+let glFailed = false;
+
+function compileShader(gl, type, source) {
+  const shader = gl.createShader(type);
+
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    throw new Error(gl.getShaderInfoLog(shader));
+  }
+
+  return shader;
+}
+
+function initGL() {
+  if (glRing) return glRing;
+  if (glFailed) return null;
+
+  try {
+    const glCanvas = document.createElement("canvas");
+    glCanvas.width = canvas.width;
+    glCanvas.height = canvas.height;
+
+    const gl = glCanvas.getContext("webgl", {
+      alpha: false,
+      antialias: false,
+      depth: false,
+      stencil: false,
+      preserveDrawingBuffer: false,
+      powerPreference: "high-performance"
+    });
+
+    if (!gl) throw new Error("WebGL indisponible");
+
+    const program = gl.createProgram();
+
+    gl.attachShader(program, compileShader(gl, gl.VERTEX_SHADER, VERT_SRC));
+    gl.attachShader(program, compileShader(gl, gl.FRAGMENT_SHADER, FRAG_SRC));
+    gl.linkProgram(program);
+
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      throw new Error(gl.getProgramInfoLog(program));
+    }
+
+    gl.useProgram(program);
+
+    // Un grand triangle qui couvre tout l'écran.
+    const buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(
+      gl.ARRAY_BUFFER,
+      new Float32Array([-1, -1, 3, -1, -1, 3]),
+      gl.STATIC_DRAW
+    );
+
+    const aPos = gl.getAttribLocation(program, "aPos");
+    gl.enableVertexAttribArray(aPos);
+    gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+    const texture = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+    const u = {};
+
+    for (const name of GL_UNIFORMS) {
+      u[name] = gl.getUniformLocation(program, name);
+    }
+
+    gl.uniform1i(u.uData, 0);
+
+    // Si le GPU est perdu, on repasse au rendu classique.
+    glCanvas.addEventListener("webglcontextlost", event => {
+      event.preventDefault();
+      glFailed = true;
+      glRing = null;
+    });
+
+    glRing = { gl, canvas: glCanvas, u, dataKey: "", texH: 1 };
+
+    return glRing;
+  } catch (error) {
+    glFailed = true;
+    glRing = null;
+
+    console.warn("WebGL indisponible, rendu classique utilisé :", error);
+
+    const info = document.getElementById("gpuInfo");
+    if (info) info.textContent = "WebGL indisponible : rendu classique utilisé.";
+
+    return null;
+  }
+}
+
+// Envoie à la carte graphique l'angle de base et le sens de chaque anneau.
+function uploadRingData(g) {
+  const key =
+    ringDataVersion + "|" + cfg.count + "|" + cfg.drift + "|" + cfg.jitter;
+
+  if (g.dataKey === key) return;
+
+  g.dataKey = key;
+
+  const rows = Math.max(1, Math.ceil(cfg.count / DATA_TEX_WIDTH));
+  const data = new Uint8Array(DATA_TEX_WIDTH * rows * 4);
+
+  for (let i = 0; i < cfg.count; i++) {
+    let base =
+      (ringOffsets[i] || 0) +
+      (ringLocal[i] || 0) * cfg.drift * DEG +
+      (ringJitter[i] || 0) * cfg.jitter * DEG;
+
+    base = ((base % TAU) + TAU) % TAU;
+
+    const n = Math.min(65535, Math.round(base / TAU * 65535));
+
+    data[i * 4] = n >> 8;
+    data[i * 4 + 1] = n & 255;
+    data[i * 4 + 2] = (ringDirections[i] || 1) > 0 ? 255 : 0;
+    data[i * 4 + 3] = 255;
+  }
+
+  const gl = g.gl;
+
+  gl.activeTexture(gl.TEXTURE0);
+  gl.texImage2D(
+    gl.TEXTURE_2D, 0, gl.RGBA, DATA_TEX_WIDTH, rows, 0,
+    gl.RGBA, gl.UNSIGNED_BYTE, data
+  );
+
+  g.texH = rows;
+}
+
+function rgbN(hex) {
+  const c = hexToRgb(hex);
+  return [c[0] / 255, c[1] / 255, c[2] / 255];
+}
+
+// Dessine fond + anneaux sur le GPU puis copie le résultat dans le canvas
+// principal. Retourne false si le GPU n'est pas utilisable.
+function renderRingsGPU(fullSpan) {
+  if (!cfg.useGPU || glFailed) return false;
+
+  const g = initGL();
+
+  if (!g) return false;
+
+  const gl = g.gl;
+  const u = g.u;
+
+  if (g.canvas.width !== canvas.width || g.canvas.height !== canvas.height) {
+    g.canvas.width = canvas.width;
+    g.canvas.height = canvas.height;
+  }
+
+  gl.viewport(0, 0, canvas.width, canvas.height);
+
+  uploadRingData(g);
+
+  const bgTop = rgbN(cfg.bgColor);
+  const bgEnd = rgbN("#1b2f7a");
+  const bgBottom = [
+    bgTop[0] + (bgEnd[0] - bgTop[0]) * 0.45,
+    bgTop[1] + (bgEnd[1] - bgTop[1]) * 0.45,
+    bgTop[2] + (bgEnd[2] - bgTop[2]) * 0.45
+  ];
+
+  const near = rgbN(cfg.gradNear);
+  const mid = rgbN(cfg.gradMid);
+  const far = rgbN(cfg.gradFar);
+  const single = rgbN(cfg.ringColor);
+
+  gl.uniform2f(u.uCanvas, canvas.width, canvas.height);
+  gl.uniform1f(u.uScale, canvas.width / W);
+  gl.uniform2f(u.uCenter, CX, CY);
+  gl.uniform1f(u.uH, H);
+  gl.uniform1f(u.uLevel, level);
+  gl.uniform1f(u.uShift, shift);
+  gl.uniform1f(u.uR0, cfg.centerRadius * cfg.zoom);
+  gl.uniform1f(u.uSp, cfg.spacing * cfg.zoom);
+  gl.uniform1f(u.uStroke, cfg.stroke);
+  gl.uniform1f(u.uHalfGap, cfg.gap * DEG / 2);
+  gl.uniform1f(u.uTime, elapsed);
+  gl.uniform1f(u.uRot, cfg.rotation * DEG);
+  gl.uniform1f(u.uOffset, cfg.offset * DEG);
+  gl.uniform1f(u.uCount, cfg.count);
+  gl.uniform1f(u.uFullSpan, fullSpan);
+  gl.uniform1f(u.uGradient, cfg.colorMode === "gradient" ? 1 : 0);
+  gl.uniform3f(u.uNear, near[0], near[1], near[2]);
+  gl.uniform3f(u.uMid, mid[0], mid[1], mid[2]);
+  gl.uniform3f(u.uFar, far[0], far[1], far[2]);
+  gl.uniform3f(u.uSingle, single[0], single[1], single[2]);
+  gl.uniform3f(u.uBgTop, bgTop[0], bgTop[1], bgTop[2]);
+  gl.uniform3f(u.uBgBottom, bgBottom[0], bgBottom[1], bgBottom[2]);
+  gl.uniform2f(u.uDataSize, DATA_TEX_WIDTH, g.texH);
+
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  // Copie pixel pour pixel dans le canvas principal (sans l'échelle).
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(g.canvas, 0, 0);
+  ctx.setTransform(renderScale, 0, 0, renderScale, 0, 0);
+
+  return true;
+}
+
+// ======================================
+// DESSIN GLOBAL
+// ======================================
+
+// Nombre d'anneaux nécessaires pour remplir l'écran.
+function computeFullSpan() {
+  const spacingPx = cfg.spacing * cfg.zoom;
+  const maxR = Math.hypot(CX, CY) + 20;
+
+  return Math.max(
+    1,
+    Math.min(600, Math.ceil((maxR - ringRadius(level)) / spacingPx) + 1)
+  );
+}
+
+// Rendu "classique" (processeur) des anneaux : utilisé si WebGL
+// n'est pas disponible ou désactivé.
+function drawRingsCPU(fullSpan) {
+  const first = level;
+  const last = Math.min(cfg.count - 1, first + fullSpan);
+
+  const gradient = cfg.colorMode === "gradient";
+  const colors = gradient ? getColorTable() : null;
+  const halfGap = cfg.gap * DEG / 2;
+
+  ctx.lineWidth = cfg.stroke;
+  ctx.lineCap = "butt";
+  ctx.globalAlpha = 1;
+
+  if (!gradient) ctx.strokeStyle = cfg.ringColor;
+
+  // Regroupement par paquets de RING_CHUNK anneaux voisins : un seul
+  // tracé (stroke) par paquet au lieu d'un par anneau.
+  for (let c0 = first + 1; c0 <= last; c0 += RING_CHUNK) {
+    const c1 = Math.min(last, c0 + RING_CHUNK - 1);
+
+    ctx.beginPath();
+
+    let added = 0;
+
+    for (let i = c0; i <= c1; i++) {
+      const radius = ringRadius(i);
+      const holeAngle = gapAngleForRing(i);
+
+      added += addArcCulled(
+        radius,
+        holeAngle + halfGap,
+        holeAngle + TAU - halfGap
+      );
+    }
+
+    if (added === 0) continue;
+
+    if (gradient) {
+      const mid = (c0 + c1) / 2;
+      const c = Math.min(
+        COLOR_STEPS - 1,
+        Math.floor((mid - first) / fullSpan * COLOR_STEPS)
+      );
+
+      ctx.strokeStyle = colors[c];
+    }
+
+    ctx.stroke();
+  }
+}
+
+function draw() {
+  ctx.setTransform(renderScale, 0, 0, renderScale, 0, 0);
+
+  const fullSpan = computeFullSpan();
+
+  // Fond + anneaux sur la carte graphique si possible.
+  const gpu = renderRingsGPU(fullSpan);
+
+  if (!gpu) drawBackground();
+
+  drawCenter();
+  drawCounter();
+
+  if (!gpu) drawRingsCPU(fullSpan);
+
+  // Anneau actif : blanc avec glow.
+  if (level < cfg.count) {
+    drawRing(level, true);
+  }
+
+  if (cfg.effects) {
+    drawSparks();
+    drawTrail();
+  }
+
+  drawBall();
+}
+
+// ======================================
+// MUSIQUE (Web Audio)
+// ======================================
+//
+// Chaîne : source -> 2 filtres passe-bas -> volume -> haut-parleurs
+//                                                  \-> enregistrement vidéo
+// Son CLAIR   : la balle vient de franchir un cercle (elle passe par un trou).
+// Son ÉTOUFFÉ : la balle vient de rebondir sur un cercle (elle ne passe pas).
+
+const CLEAR_FREQ = 18000;
+
+let audioCtx = null;
+let musicBuffer = null;
+let musicSource = null;
+let musicFilters = [];
+let musicGain = null;
+let recordDest = null;
+let recordDelay = null;
+let musicClear = false;
+let audioLastTime = null;   // dernier instant lu sur l'horloge audio
+let leadTimer = null;
+
+function setMusicStatus(text) {
+  document.getElementById("musicStatus").textContent = text;
+}
+
+function ensureAudio() {
+  if (audioCtx) return audioCtx;
+
+  const AudioCtor = window.AudioContext || window.webkitAudioContext;
+
+  if (!AudioCtor) return null;
+
+  audioCtx = new AudioCtor();
+
+  // Deux filtres en série : coupure plus franche (24 dB/octave).
+  musicFilters = [];
+
+  for (let i = 0; i < 2; i++) {
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.Q.value = 0.7;
+    musicFilters.push(filter);
+  }
+
+  musicGain = audioCtx.createGain();
+  recordDest = audioCtx.createMediaStreamDestination();
+
+  musicFilters[0].connect(musicFilters[1]);
+  musicFilters[1].connect(musicGain);
+  musicGain.connect(audioCtx.destination);
+
+  // Branche "enregistrement" : un petit retard réglable permet de recaler
+  // le son dans la vidéo (haut-parleurs inchangés).
+  recordDelay = audioCtx.createDelay(1);
+  musicGain.connect(recordDelay);
+  recordDelay.connect(recordDest);
+  applyRecordDelay();
+
+  applyMusicState(true);
+
+  return audioCtx;
+}
+
+// Décalage positif : le son est retardé dans la vidéo.
+// (Décalage négatif : c'est l'image qui est retardée, voir startSimulation.)
+function applyRecordDelay() {
+  if (!recordDelay) return;
+
+  recordDelay.delayTime.value = Math.max(0, cfg.avOffset) / 1000;
+}
+
+// Applique l'état clair / étouffé. immediate = true : sans transition.
+function applyMusicState(immediate) {
+  if (!audioCtx) return;
+
+  const t = audioCtx.currentTime;
+
+  const freq = musicClear ? CLEAR_FREQ : cfg.muffleFreq;
+  const volume =
+    (cfg.musicVolume / 100) *
+    (musicClear ? 1 : cfg.muffleVolume / 100);
+
+  // Ouverture rapide, fermeture un peu plus douce.
+  const timeConstant = musicClear ? 0.04 : 0.07;
+
+  for (const filter of musicFilters) {
+    if (immediate) {
+      filter.frequency.cancelScheduledValues(t);
+      filter.frequency.setValueAtTime(freq, t);
+    } else {
+      filter.frequency.setTargetAtTime(freq, t, timeConstant);
+    }
+  }
+
+  if (immediate) {
+    musicGain.gain.cancelScheduledValues(t);
+    musicGain.gain.setValueAtTime(volume, t);
+  } else {
+    musicGain.gain.setTargetAtTime(volume, t, timeConstant);
+  }
+}
+
+function setMusicClear(flag) {
+  if (flag === musicClear) return;
+
+  musicClear = flag;
+  applyMusicState(false);
+}
+
+function startMusic() {
+  if (!musicBuffer || !ensureAudio()) return;
+
+  stopMusic();
+
+  musicClear = false;
+  applyMusicState(true);
+
+  if (audioCtx.state === "suspended") audioCtx.resume();
+
+  musicSource = audioCtx.createBufferSource();
+  musicSource.buffer = musicBuffer;
+  musicSource.loop = cfg.musicLoop;
+  musicSource.connect(musicFilters[0]);
+
+  const offset = clamp(cfg.musicOffset, 0, Math.max(0, musicBuffer.duration - 0.1));
+
+  // L'horloge de l'animation est calée sur l'horloge audio (voir animate).
+  const startAt = audioCtx.currentTime;
+
+  musicSource.start(startAt, offset);
+  audioLastTime = startAt;
+}
+
+function stopMusic() {
+  if (!musicSource) return;
+
+  try {
+    musicSource.stop();
+  } catch (error) {
+    // déjà arrêtée
+  }
+
+  musicSource.disconnect();
+  musicSource = null;
+}
+
+function pauseMusic() {
+  if (audioCtx && musicSource) audioCtx.suspend();
+}
+
+function resumeMusic() {
+  audioLastTime = null;
+
+  if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+}
+
+// Fin de l'animation : fondu rapide puis arrêt.
+function fadeOutMusic() {
+  if (!audioCtx || !musicSource) return;
+
+  musicGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.1);
+
+  const source = musicSource;
+
+  setTimeout(() => {
+    if (source === musicSource) stopMusic();
+  }, 500);
+}
+
+// ======================================
+// EFFETS : zoom fluide, traînée, étincelles
+// ======================================
+
+// Générateur aléatoire séparé : les effets ne modifient jamais
+// la suite de nombres aléatoires utilisée par la physique.
+let fxSeed = 123456789;
+
+function fxRand() {
+  fxSeed ^= fxSeed << 13;
+  fxSeed ^= fxSeed >>> 17;
+  fxSeed ^= fxSeed << 5;
+
+  return (fxSeed >>> 0) / 4294967296;
+}
+
+// Zoom : ressort amorti. Contrairement à une simple décroissance,
+// le mouvement démarre en douceur (pas de "à-coup" à chaque cercle).
+function updateZoomSpring(dt) {
+  const w = 24;
+  const e = Math.exp(-w * dt);
+  const c1 = shiftVel + w * shift;
+
+  shift = (shift + c1 * dt) * e;
+  shiftVel = (shiftVel - w * c1 * dt) * e;
+
+  if (shift < 0) {
+    shift = 0;
+    shiftVel = 0;
+  } else if (shift < 0.05 && Math.abs(shiftVel) < 1) {
+    shift = 0;
+    shiftVel = 0;
+  }
+}
+
+// Position de la balle à l'écran (relative au centre), avec le même
+// décalage de zoom que les anneaux (nul au centre).
+let bvx = 0;
+let bvy = 0;
+
+function computeBallVisual() {
+  const R = cfg.centerRadius * cfg.zoom;
+  const dist = Math.hypot(ball.x, ball.y);
+
+  const push = shift * clamp(dist / R, 0, 1);
+  const k = dist > 0 ? (dist + push) / dist : 1;
+
+  bvx = ball.x * k;
+  bvy = ball.y * k;
+}
+
+// --- Traînée de la balle ---
+
+const TRAIL_LEN = 22;
+const trail = new Float32Array(TRAIL_LEN * 2);
+let trailHead = 0;
+let trailCount = 0;
+
+function pushTrail() {
+  computeBallVisual();
+
+  trail[trailHead * 2] = bvx;
+  trail[trailHead * 2 + 1] = bvy;
+
+  trailHead = (trailHead + 1) % TRAIL_LEN;
+  trailCount = Math.min(TRAIL_LEN, trailCount + 1);
+}
+
+function drawTrail() {
+  if (trailCount < 2) return;
+
+  ctx.strokeStyle = cfg.ballColor;
+  ctx.lineCap = "round";
+
+  for (let i = 0; i < trailCount - 1; i++) {
+    const a = (trailHead - trailCount + i + TRAIL_LEN) % TRAIL_LEN;
+    const b = (a + 1) % TRAIL_LEN;
+
+    // t : 0 = vieux bout de la traînée, 1 = près de la balle
+    const t = (i + 1) / trailCount;
+
+    ctx.globalAlpha = 0.55 * t * t;
+    ctx.lineWidth = Math.max(1, ball.r * 1.7 * t);
+
+    ctx.beginPath();
+    ctx.moveTo(CX + trail[a * 2], CY + trail[a * 2 + 1]);
+    ctx.lineTo(CX + trail[b * 2], CY + trail[b * 2 + 1]);
+    ctx.stroke();
+  }
+
+  ctx.globalAlpha = 1;
+  ctx.lineCap = "butt";
+}
+
+// --- Étincelles au franchissement d'un cercle ---
+
+const MAX_SPARKS = 160;
+const spX = new Float32Array(MAX_SPARKS);
+const spY = new Float32Array(MAX_SPARKS);
+const spVX = new Float32Array(MAX_SPARKS);
+const spVY = new Float32Array(MAX_SPARKS);
+const spLife = new Float32Array(MAX_SPARKS);
+let spNext = 0;
+
+function spawnSparks(x, y, dirX, dirY) {
+  if (!cfg.effects) return;
+
+  const baseAngle = Math.atan2(dirY, dirX);
+
+  for (let k = 0; k < 4; k++) {
+    const i = spNext;
+    spNext = (spNext + 1) % MAX_SPARKS;
+
+    const angle = baseAngle + (fxRand() - 0.5) * 1.8;
+    const speed = 120 + fxRand() * 260;
+
+    spX[i] = x;
+    spY[i] = y;
+    spVX[i] = Math.cos(angle) * speed;
+    spVY[i] = Math.sin(angle) * speed;
+    spLife[i] = 1;
+  }
+}
+
+function updateEffects(dt) {
+  crossFlash *= Math.exp(-dt * 7);
+  if (crossFlash < 0.01) crossFlash = 0;
+
+  if (!cfg.effects) return;
+
+  pushTrail();
+
+  const drag = Math.exp(-dt * 3);
+  const fade = dt / 0.5;
+
+  for (let i = 0; i < MAX_SPARKS; i++) {
+    if (spLife[i] <= 0) continue;
+
+    spX[i] += spVX[i] * dt;
+    spY[i] += spVY[i] * dt;
+    spVX[i] *= drag;
+    spVY[i] *= drag;
+    spLife[i] -= fade;
+  }
+}
+
+function drawSparks() {
+  ctx.fillStyle = cfg.ballColor;
+
+  // 3 niveaux de transparence, un seul tracé par niveau.
+  for (let level = 0; level < 3; level++) {
+    const lo = level / 3;
+    const hi = (level + 1) / 3;
+
+    ctx.globalAlpha = [0.3, 0.6, 0.95][level];
+    ctx.beginPath();
+
+    for (let i = 0; i < MAX_SPARKS; i++) {
+      const life = spLife[i];
+
+      if (life <= lo || life > hi) continue;
+
+      const size = 1.5 + 2 * life;
+      ctx.rect(CX + spX[i] - size / 2, CY + spY[i] - size / 2, size, size);
+    }
+
+    ctx.fill();
+  }
+
+  ctx.globalAlpha = 1;
+}
+
+// ======================================
+// BOUCLE D'ANIMATION
+// ======================================
+
+function animate(timestamp) {
+  if (!running || paused) return;
+
+  if (!lastTime) lastTime = timestamp;
+
+  let dt;
+
+  if (musicSource && audioCtx && audioCtx.state === "running") {
+    // Une musique joue : c'est elle qui donne l'heure. Si l'image est
+    // lente, l'animation saute des images mais reste synchronisée avec
+    // le son (avant, elle ralentissait et le son prenait de l'avance).
+    const now = audioCtx.currentTime;
+
+    if (audioLastTime === null) audioLastTime = now;
+
+    dt = Math.min(now - audioLastTime, 5);
+    audioLastTime = now;
+  } else {
+    audioLastTime = null;
+    dt = Math.min((timestamp - lastTime) / 1000, 0.25);
+  }
+
+  lastTime = timestamp;
+
+  updatePhysics(dt);
+
+  updateZoomSpring(dt);
+  updateEffects(dt);
+
+  elapsed += dt;
+
+  if (elapsed >= cfg.duration) {
+    finishSimulation();
+    return;
+  }
+
+  // Écrans 90/120/144 Hz : inutile de redessiner à chaque rafraîchissement.
+  // La physique, elle, avance à chaque image avec le vrai temps écoulé.
+  if (timestamp - lastDrawTime >= 10) {
+    const t0 = performance.now();
+    draw();
+    adaptPreviewQuality(performance.now() - t0);
+    lastDrawTime = timestamp;
+  }
+
+  animationFrame = requestAnimationFrame(animate);
+}
+
+// ======================================
+// CONTRÔLES DE L'ANIMATION
+// ======================================
+
+function startSimulation() {
+  if (running && !paused) return;
+
+  if (!paused && !recording) {
+    drawTimeAvg = 0;
+    if (renderScale !== previewScale) setRenderScale(previewScale);
+  }
+
+  if (finished) {
+    resetSimulation();
+  }
+
+  if (paused) {
+    paused = false;
+    running = true;
+    lastTime = 0;
+    resumeMusic();
+    keepAwake(true);
+    updateStatus("Animation en cours");
+    animationFrame = requestAnimationFrame(animate);
+    return;
+  }
+
+  running = true;
+  paused = false;
+  lastTime = 0;
+
+  startMusic();
+  keepAwake(true);
+
+  updateStatus("Animation en cours");
+
+  // Décalage négatif (vidéo en cours d'enregistrement) : l'image démarre
+  // un peu après le son.
+  const lead = recording && musicSource && cfg.avOffset < 0 ? -cfg.avOffset : 0;
+
+  const begin = () => {
+    leadTimer = null;
+    lastTime = 0;
+    audioLastTime = null;
+
+    if (running && !paused) {
+      animationFrame = requestAnimationFrame(animate);
+    }
+  };
+
+  if (lead > 0) {
+    leadTimer = setTimeout(begin, lead);
+  } else {
+    animationFrame = requestAnimationFrame(animate);
+  }
+}
+
+function pauseSimulation() {
+  if (!running) return;
+
+  // Mettre le son en pause pendant l'enregistrement le décalerait par
+  // rapport à l'image : on l'interdit.
+  if (recording && !paused) {
+    updateStatus("Pause impossible pendant l'enregistrement");
+    return;
+  }
+
+  paused = !paused;
+
+  if (paused) {
+    updateStatus("En pause");
+    cancelAnimationFrame(animationFrame);
+    pauseMusic();
+    keepAwake(false);
+  } else {
+    resumeMusic();
+    lastTime = 0;
+    updateStatus("Animation en cours");
+    animationFrame = requestAnimationFrame(animate);
+  }
+}
+
+function finishSimulation() {
+  running = false;
+  paused = false;
+  finished = true;
+
+  cancelAnimationFrame(animationFrame);
+
+  draw();
+
+  updateStatus("Animation terminée");
+
+  fadeOutMusic();
+  keepAwake(false);
+
+  if (recording && recorder && recorder.state !== "inactive") {
+    // Si de la musique joue, on laisse le fondu se terminer dans la vidéo.
+    const delay = musicSource ? 450 + Math.max(0, cfg.avOffset) : 0;
+
+    setTimeout(() => {
+      if (recorder && recorder.state !== "inactive") recorder.stop();
+    }, delay);
+  }
+}
+
+// ======================================
+// ENREGISTREMENT VIDÉO
+// ======================================
+
+function startRecording() {
+  if (!canvas.captureStream || !window.MediaRecorder) {
+    updateStatus("Enregistrement non pris en charge par ce navigateur");
+    return;
+  }
+
+  if (recording) return;
+
+  // On repart d'une animation neuve AVANT de lancer l'enregistreur :
+  // resetSimulation() arrête tout enregistrement en cours.
+  if (finished) resetSimulation();
+
+  // La vidéo est enregistrée à la qualité choisie (50 % = 540 x 960,
+  // 75 % = 810 x 1440, 100 % = 1080 x 1920).
+  setRenderScale(previewScale);
+
+  const stream = canvas.captureStream(60);
+
+  // La musique (avec son effet clair / étouffé) est ajoutée à la vidéo.
+  if (musicBuffer && ensureAudio()) {
+    recordDest.stream.getAudioTracks().forEach(track => stream.addTrack(track));
+  }
+
+  let mimeType = "";
+
+  if (MediaRecorder.isTypeSupported("video/mp4")) {
+    mimeType = "video/mp4";
+  } else if (MediaRecorder.isTypeSupported("video/webm;codecs=vp9")) {
+    mimeType = "video/webm;codecs=vp9";
+  } else if (MediaRecorder.isTypeSupported("video/webm;codecs=vp8")) {
+    mimeType = "video/webm;codecs=vp8";
+  } else if (MediaRecorder.isTypeSupported("video/webm")) {
+    mimeType = "video/webm";
+  }
+
+  try {
+    // Débit élevé : les lignes fines et serrées passent mal à bas débit.
+    // Le débit suit la résolution (12 Mb/s à 100 %, moins si on réduit).
+    const options = {
+      videoBitsPerSecond: Math.round(
+        Math.max(4000000, 12000000 * previewScale * previewScale)
+      )
+    };
+    if (mimeType) options.mimeType = mimeType;
+
+    recorder = new MediaRecorder(stream, options);
+  } catch (error) {
+    setRenderScale(previewScale);
+    updateStatus("Impossible de démarrer l'enregistrement");
+    return;
+  }
+
+  recordedChunks = [];
+  recording = true;
+  lastVideoFile = null;
+  updateShareButton();
+
+  recorder.ondataavailable = event => {
+    if (event.data && event.data.size > 0) {
+      recordedChunks.push(event.data);
+    }
+  };
+
+  recorder.onstop = () => {
+    const type = recorder.mimeType || "video/webm";
+    const extension = type.includes("mp4") ? "mp4" : "webm";
+
+    const blob = new Blob(recordedChunks, { type });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = "ring-animation." + extension;
+
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+    if (typeof File === "function") {
+      lastVideoFile = new File([blob], "ring-animation." + extension, { type });
+      updateShareButton();
+    }
+
+    recording = false;
+    setRenderScale(previewScale);
+    updateStatus("Vidéo enregistrée (" + extension.toUpperCase() + ")");
+  };
+
+  recorder.start();
+
+  if (!running) {
+    startSimulation();
+  } else if (paused) {
+    pauseSimulation();
+  }
+
+  updateStatus("Enregistrement en cours");
+}
+
+// ======================================
+// INTERFACE
+// ======================================
+
+// Garde l'écran allumé pendant l'animation (important sur téléphone :
+// si l'écran s'éteint, l'animation et l'enregistrement s'arrêtent).
+let wakeLock = null;
+
+async function keepAwake(on) {
+  try {
+    if (on) {
+      if (navigator.wakeLock && !wakeLock) {
+        wakeLock = await navigator.wakeLock.request("screen");
+        wakeLock.addEventListener("release", () => { wakeLock = null; });
+      }
+    } else if (wakeLock) {
+      await wakeLock.release();
+      wakeLock = null;
+    }
+  } catch (error) {
+    wakeLock = null;
+  }
+}
+
+if (typeof document.addEventListener === "function") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && running && !paused) {
+      keepAwake(true);
+    }
+  });
+}
+
+// Bouton "Partager" : sur téléphone, ouvre le menu de partage (enregistrer
+// dans la galerie, TikTok, etc.) quand le navigateur le permet.
+let lastVideoFile = null;
+
+function updateShareButton() {
+  const button = document.getElementById("shareBtn");
+
+  if (!button) return;
+
+  button.hidden = !(
+    lastVideoFile &&
+    navigator.canShare &&
+    navigator.canShare({ files: [lastVideoFile] })
+  );
+}
+
+document.getElementById("shareBtn").addEventListener("click", () => {
+  if (!lastVideoFile || !navigator.share) return;
+
+  navigator
+    .share({ files: [lastVideoFile], title: "Animation" })
+    .catch(() => {});
+});
+
+function updateStatus(message) {
+  document.getElementById("status").textContent = message;
+}
+
+function updateCounter() {
+  const remaining = Math.max(0, cfg.count - level);
+
+  document.getElementById("counter").textContent =
+    remaining + " cercles restants";
+}
+
+function bindRange(id, key, displayId, formatter = v => v) {
+  const input = document.getElementById(id);
+  const display = document.getElementById(displayId);
+
+  input.addEventListener("input", () => {
+    cfg[key] = Number(input.value);
+
+    if (display) {
+      display.textContent = formatter(cfg[key]);
+    }
+
+    if (key === "count") {
+      cfg.count = Math.max(1, cfg.count);
+      generateRingOffsets();
+      level = Math.min(level, cfg.count - 1);
+      updateCounter();
+    }
+
+    if (key === "ballSize") {
+      ball.r = cfg.ballSize;
+    }
+
+    draw();
+  });
+}
+
+bindRange("count", "count", "countValue");
+bindRange("ballSize", "ballSize", "ballSizeValue");
+bindRange("speed", "speed", "speedValue");
+bindRange("groupMin", "groupMin", "groupMinValue");
+bindRange("groupMax", "groupMax", "groupMaxValue");
+bindRange("centerRadius", "centerRadius", "centerRadiusValue");
+bindRange("drift", "drift", "driftValue", v => v + "°");
+bindRange("jitter", "jitter", "jitterValue", v => v + "°");
+bindRange("gap", "gap", "gapValue", v => v + "°");
+bindRange("spacing", "spacing", "spacingValue");
+bindRange("stroke", "stroke", "strokeValue");
+bindRange("rotation", "rotation", "rotationValue", v => v + "°/s");
+bindRange("offset", "offset", "offsetValue", v => v + "°");
+bindRange("zoom", "zoom", "zoomValue", v => Number(v).toFixed(2));
+bindRange("duration", "duration", "durationValue");
+
+// Paquets : garde min <= max puis régénère les angles.
+["groupMin", "groupMax"].forEach(id => {
+  document.getElementById(id).addEventListener("input", () => {
+    if (cfg.groupMin > cfg.groupMax) {
+      if (id === "groupMin") {
+        cfg.groupMax = cfg.groupMin;
+        document.getElementById("groupMax").value = cfg.groupMax;
+        document.getElementById("groupMaxValue").textContent = cfg.groupMax;
+      } else {
+        cfg.groupMin = cfg.groupMax;
+        document.getElementById("groupMin").value = cfg.groupMin;
+        document.getElementById("groupMinValue").textContent = cfg.groupMin;
+      }
+    }
+
+    generateRingOffsets();
+    draw();
+  });
+});
+
+bindRange("musicVolume", "musicVolume", "musicVolumeValue", v => v + "%");
+bindRange("muffleVolume", "muffleVolume", "muffleVolumeValue", v => v + "%");
+bindRange("muffleFreq", "muffleFreq", "muffleFreqValue", v => v + " Hz");
+bindRange("avOffset", "avOffset", "avOffsetValue", v => v + " ms");
+
+document.getElementById("avOffset").addEventListener("input", () => {
+  applyRecordDelay();
+});
+
+["musicVolume", "muffleVolume", "muffleFreq"].forEach(id => {
+  document.getElementById(id).addEventListener("input", () => {
+    applyMusicState(false);
+  });
+});
+
+document.getElementById("musicOffset").addEventListener("input", e => {
+  cfg.musicOffset = Math.max(0, Number(e.target.value) || 0);
+});
+
+document.getElementById("musicLoop").addEventListener("change", e => {
+  cfg.musicLoop = e.target.checked;
+});
+
+document.getElementById("musicFile").addEventListener("change", async e => {
+  const file = e.target.files && e.target.files[0];
+
+  if (!file) return;
+
+  // Le clic sur le fichier est un geste utilisateur : on peut créer l'audio.
+  if (!ensureAudio()) {
+    setMusicStatus("Audio non pris en charge par ce navigateur");
+    return;
+  }
+
+  setMusicStatus("Chargement…");
+
+  try {
+    const data = await file.arrayBuffer();
+    musicBuffer = await audioCtx.decodeAudioData(data);
+
+    const minutes = Math.floor(musicBuffer.duration / 60);
+    const seconds = Math.round(musicBuffer.duration % 60);
+
+    setMusicStatus(
+      file.name + " (" + minutes + ":" + String(seconds).padStart(2, "0") + ")"
+    );
+  } catch (error) {
+    musicBuffer = null;
+    setMusicStatus("Impossible de lire ce fichier audio");
+  }
+});
+
+document.getElementById("effects").addEventListener("change", e => {
+  cfg.effects = e.target.checked;
+  trailCount = 0;
+  spLife.fill(0);
+  draw();
+});
+
+// Nouvelle disposition aléatoire : trous, paquets, sens de rotation,
+// direction de la balle et étoiles. Les réglages ne changent pas, et
+// l'animation continue là où elle en est (si elle est terminée, elle
+// repart de zéro avec une disposition neuve).
+function shuffleLayout() {
+  if (finished) {
+    resetSimulation();
+    return;
+  }
+
+  generateRingOffsets();
+  generateStars();
+
+  const direction = random(0, TAU);
+  const speed = Math.hypot(ball.vx, ball.vy) || cfg.speed;
+
+  ball.vx = Math.cos(direction) * speed;
+  ball.vy = Math.sin(direction) * speed;
+
+  if (!running) updateStatus("Nouvelle disposition générée");
+
+  draw();
+}
+
+document.getElementById("shuffleBtn").addEventListener("click", shuffleLayout);
+
+// Petit écran : un seul groupe de réglages ouvert à la fois (le premier au
+// départ). Grand écran : tout reste ouvert.
+if (window.matchMedia && document.querySelectorAll) {
+  const mobileQuery = window.matchMedia("(max-width: 1050px)");
+  const sections = document.querySelectorAll(".side details");
+
+  const applyPanelMode = () => {
+    sections.forEach((section, index) => {
+      section.open = mobileQuery.matches ? index === 0 : true;
+    });
+  };
+
+  sections.forEach(section => {
+    section.addEventListener("toggle", () => {
+      if (!mobileQuery.matches || !section.open) return;
+
+      sections.forEach(other => {
+        if (other !== section) other.open = false;
+      });
+    });
+  });
+
+  if (mobileQuery.addEventListener) {
+    mobileQuery.addEventListener("change", applyPanelMode);
+  }
+
+  applyPanelMode();
+}
+
+document.getElementById("useGPU").addEventListener("change", e => {
+  cfg.useGPU = e.target.checked;
+  draw();
+});
+
+document.getElementById("quality").addEventListener("change", e => {
+  previewScale = Number(e.target.value);
+
+  // Pendant un enregistrement la résolution ne doit pas changer.
+  if (!recording) setRenderScale(previewScale);
+});
+
+document.getElementById("directionMode").addEventListener("change", e => {
+  cfg.directionMode = e.target.value;
+  generateRingDirections();
+  draw();
+});
+
+// ======================================
+// COULEURS HEX
+// ======================================
+
+function bindColor(colorId, hexId, key) {
+  const colorInput = document.getElementById(colorId);
+  const hexInput = document.getElementById(hexId);
+
+  colorInput.addEventListener("input", () => {
+    cfg[key] = colorInput.value;
+    hexInput.value = colorInput.value;
+    draw();
+  });
+
+  hexInput.addEventListener("change", () => {
+    const value = hexInput.value.trim();
+
+    if (/^#[0-9a-fA-F]{6}$/.test(value)) {
+      cfg[key] = value;
+      colorInput.value = value;
+      draw();
+    } else {
+      hexInput.value = cfg[key];
+    }
+  });
+}
+
+bindColor("bgColor", "bgHex", "bgColor");
+bindColor("ringColor", "ringHex", "ringColor");
+bindColor("activeColor", "activeHex", "activeColor");
+bindColor("ballColor", "ballHex", "ballColor");
+bindColor("glowColor", "glowHex", "glowColor");
+bindColor("gradNear", "gradNearHex", "gradNear");
+bindColor("gradMid", "gradMidHex", "gradMid");
+bindColor("gradFar", "gradFarHex", "gradFar");
+
+document.getElementById("colorMode").addEventListener("change", e => {
+  cfg.colorMode = e.target.value;
+  draw();
+});
+
+// ======================================
+// BOUTONS
+// ======================================
+
+document.getElementById("startBtn").addEventListener(
+  "click",
+  startSimulation
+);
+
+document.getElementById("pauseBtn").addEventListener(
+  "click",
+  pauseSimulation
+);
+
+document.getElementById("resetBtn").addEventListener(
+  "click",
+  resetSimulation
+);
+
+document.getElementById("recordBtn").addEventListener(
+  "click",
+  startRecording
+);
+
+// ======================================
+// INITIALISATION
+// ======================================
+
+generateStars();
+setRenderScale(previewScale);
+resetSimulation();
+
+</script>
+</body>
+</html>
