@@ -187,7 +187,7 @@ canvas {
   width: 100%;
   max-width: 600px;
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
   gap: 6px;
 }
 
@@ -432,7 +432,8 @@ button {
       <button id="pauseBtn" class="secondary">Pause</button>
       <button id="resetBtn" class="secondary">Réinitialiser</button>
       <button id="shuffleBtn" class="shuffle" title="Nouvelle disposition aléatoire des trous">🎲 Mélanger</button>
-      <button id="recordBtn" class="record">Enregistrer</button>
+      <button id="exportBtn" class="record" title="Vidéo MP4 à cadence fixe, compatible TikTok">Exporter MP4</button>
+      <button id="recordBtn" class="secondary" title="Enregistre en temps réel (peut saccader)">Enreg. direct</button>
     </div>
 
     <div class="options">
@@ -441,6 +442,12 @@ button {
           <option value="0.5">50 % : 540×960</option>
           <option value="0.75" selected>75 % : 810×1440</option>
           <option value="1">100 % : 1080×1920</option>
+        </select>
+      </label>
+      <label id="fpsLabel">Images/s
+        <select id="fps">
+          <option value="30" selected>30</option>
+          <option value="60">60</option>
         </select>
       </label>
       <label><input id="effects" type="checkbox" checked> Effets</label>
@@ -773,6 +780,8 @@ let groupDirections = [];
 let ringLocal = [];
 let ringJitter = [];
 let ringDataVersion = 0;
+let exportMode = false;      // true pendant l'export MP4 image par image
+let exportEvents = [];       // [temps, son clair ?] enregistrés pendant l'export
 let shift = 0;
 let shiftVel = 0;
 let crossFlash = 0;
@@ -921,7 +930,9 @@ function generateRingDirections() {
 // INITIALISATION
 // ======================================
 
-function resetSimulation() {
+// keepLayout === true : on garde la disposition actuelle des trous.
+// (Strictement true : le clic sur le bouton passe un événement en argument.)
+function resetSimulation(keepLayout) {
   running = false;
   paused = false;
   finished = false;
@@ -945,7 +956,7 @@ function resetSimulation() {
   ball.vx = Math.cos(initialDirection) * cfg.speed;
   ball.vy = Math.sin(initialDirection) * cfg.speed;
 
-  generateRingOffsets();
+  if (keepLayout !== true) generateRingOffsets();
 
   clearTimeout(leadTimer);
   leadTimer = null;
@@ -2084,6 +2095,13 @@ function setMusicClear(flag) {
   if (flag === musicClear) return;
 
   musicClear = flag;
+
+  // Export MP4 : on note l'instant du changement, le son est calculé après.
+  if (exportMode) {
+    exportEvents.push([elapsed, flag]);
+    return;
+  }
+
   applyMusicState(false);
 }
 
@@ -2465,7 +2483,7 @@ function finishSimulation() {
   updateStatus("Animation terminée");
 
   fadeOutMusic();
-  keepAwake(false);
+  if (!exportMode) keepAwake(false);
 
   if (recording && recorder && recorder.state !== "inactive") {
     // Si de la musique joue, on laisse le fondu se terminer dans la vidéo.
@@ -2581,6 +2599,789 @@ function startRecording() {
   }
 
   updateStatus("Enregistrement en cours");
+}
+
+// ======================================
+// EXPORT MP4 : ASSEMBLAGE DU FICHIER (MUXER)
+// ======================================
+// Écrit un vrai fichier MP4 (H.264 + AAC) à cadence FIXE, avec le
+// "moov" au début (démarrage rapide). Aucune bibliothèque externe.
+// -- DEBUT MUXER --
+
+function mp4U16(n) {
+  return [(n >> 8) & 255, n & 255];
+}
+
+function mp4U32(n) {
+  return [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
+}
+
+function mp4Str(text) {
+  return [text.charCodeAt(0), text.charCodeAt(1), text.charCodeAt(2), text.charCodeAt(3)];
+}
+
+function mp4Cat(...parts) {
+  let length = 0;
+
+  for (const part of parts) length += part.length;
+
+  const out = new Uint8Array(length);
+  let offset = 0;
+
+  for (const part of parts) {
+    out.set(part, offset);
+    offset += part.length;
+  }
+
+  return out;
+}
+
+function mp4Box(type, ...parts) {
+  const body = mp4Cat(...parts);
+
+  return mp4Cat(mp4U32(body.length + 8), mp4Str(type), body);
+}
+
+function mp4FullBox(type, version, flags, ...parts) {
+  return mp4Box(
+    type,
+    [version, (flags >> 16) & 255, (flags >> 8) & 255, flags & 255],
+    ...parts
+  );
+}
+
+// Tableau de nombres 32 bits (grande table : pas de décompression d'arguments).
+function mp4Table(values) {
+  const out = new Uint8Array(values.length * 4);
+  const view = new DataView(out.buffer);
+
+  for (let i = 0; i < values.length; i++) view.setUint32(i * 4, values[i] >>> 0);
+
+  return out;
+}
+
+const MP4_MATRIX = [
+  ...mp4U32(0x00010000), ...mp4U32(0), ...mp4U32(0),
+  ...mp4U32(0), ...mp4U32(0x00010000), ...mp4U32(0),
+  ...mp4U32(0), ...mp4U32(0), ...mp4U32(0x40000000)
+];
+
+function mp4Zeros(n) {
+  return new Array(n).fill(0);
+}
+
+// Valeurs numériques des espaces colorimétriques (norme H.273).
+function mp4ColorBox(colorSpace) {
+  if (!colorSpace) return new Uint8Array(0);
+
+  const primaries = { bt709: 1, bt470bg: 5, smpte170m: 6, bt2020: 9 };
+  const transfer = { bt709: 1, smpte170m: 6, "iec61966-2-1": 13, srgb: 13, pq: 16, hlg: 18 };
+  const matrix = { rgb: 0, bt709: 1, bt470bg: 5, smpte170m: 6, bt2020: 9, "bt2020-ncl": 9 };
+
+  const p = primaries[colorSpace.primaries];
+  const t = transfer[colorSpace.transfer];
+  const m = matrix[colorSpace.matrix];
+
+  if (p === undefined || t === undefined || m === undefined) {
+    return new Uint8Array(0);
+  }
+
+  return mp4Box(
+    "colr",
+    mp4Str("nclx"), mp4U16(p), mp4U16(t), mp4U16(m),
+    [colorSpace.fullRange ? 0x80 : 0]
+  );
+}
+
+function mp4AudioSpecificConfig(sampleRate, channels) {
+  const rates = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000];
+  const index = Math.max(0, rates.indexOf(sampleRate));
+  const value = (2 << 11) | (index << 7) | (channels << 3);
+
+  return [(value >> 8) & 255, value & 255];
+}
+
+// video : [{ data: Uint8Array (format AVCC), key: bool, ts: microsecondes }]
+// audio : { samples: [Uint8Array], sampleRate, channels, asc: Uint8Array } ou null
+function buildMP4({ width, height, fps, video, avcC, colorSpace, audio }) {
+  const videoTimescale = fps * 1000;
+  const frameDelta = 1000;
+
+  // Durées de chaque image, dans l'unité du fichier (constantes en pratique).
+  const videoPts = video.map(sample => Math.round(sample.ts * videoTimescale / 1e6));
+  const videoDeltas = videoPts.map((pts, i) =>
+    i + 1 < videoPts.length ? Math.max(1, videoPts[i + 1] - pts) : frameDelta
+  );
+
+  const videoDuration = videoDeltas.reduce((a, b) => a + b, 0);
+  const videoMs = Math.round(videoDuration * 1000 / videoTimescale);
+
+  const audioFrames = audio ? audio.samples.length : 0;
+  const audioDuration = audioFrames * 1024;
+  const audioMs = audio ? Math.round(audioDuration * 1000 / audio.sampleRate) : 0;
+
+  const movieMs = Math.max(videoMs, audioMs);
+
+  // ---- ordre des échantillons dans le fichier : entrelacés par instant ----
+  const order = [];
+  let vi = 0;
+  let ai = 0;
+
+  while (vi < video.length || ai < audioFrames) {
+    const videoTime = vi < video.length ? videoPts[vi] / videoTimescale : Infinity;
+    const audioTime = ai < audioFrames ? ai * 1024 / audio.sampleRate : Infinity;
+
+    if (audioTime <= videoTime) order.push([1, ai++]);
+    else order.push([0, vi++]);
+  }
+
+  const videoOffsets = new Array(video.length);
+  const audioOffsets = new Array(audioFrames);
+  const dataParts = [];
+
+  let position = 0;
+
+  for (const [track, index] of order) {
+    const data = track === 0 ? video[index].data : audio.samples[index];
+
+    if (track === 0) videoOffsets[index] = position;
+    else audioOffsets[index] = position;
+
+    dataParts.push(data);
+    position += data.length;
+  }
+
+  const mdatSize = position;
+
+  if (mdatSize + 8 > 0xFFFFFFFF) {
+    throw new Error("Vidéo trop volumineuse pour un fichier MP4 simple");
+  }
+
+  // ---- tables d'échantillons ----
+  const keyNumbers = [];
+  video.forEach((sample, i) => { if (sample.key) keyNumbers.push(i + 1); });
+
+  // stts : on regroupe les durées identiques
+  const sttsEntries = [];
+
+  for (const delta of videoDeltas) {
+    const last = sttsEntries[sttsEntries.length - 1];
+
+    if (last && last[1] === delta) last[0]++;
+    else sttsEntries.push([1, delta]);
+  }
+
+  function buildMoov(base) {
+    // --- piste vidéo ---
+    const avc1 = mp4Box(
+      "avc1",
+      mp4Zeros(6), mp4U16(1),
+      mp4Zeros(16),
+      mp4U16(width), mp4U16(height),
+      mp4U32(0x00480000), mp4U32(0x00480000),
+      mp4U32(0), mp4U16(1),
+      mp4Zeros(32),
+      mp4U16(0x0018), [0xFF, 0xFF],
+      mp4Box("avcC", avcC),
+      mp4ColorBox(colorSpace)
+    );
+
+    const videoStbl = mp4Box(
+      "stbl",
+      mp4FullBox("stsd", 0, 0, mp4U32(1), avc1),
+      mp4FullBox(
+        "stts", 0, 0, mp4U32(sttsEntries.length),
+        mp4Table(sttsEntries.flat())
+      ),
+      keyNumbers.length
+        ? mp4FullBox("stss", 0, 0, mp4U32(keyNumbers.length), mp4Table(keyNumbers))
+        : new Uint8Array(0),
+      mp4FullBox("stsc", 0, 0, mp4U32(1), mp4U32(1), mp4U32(1), mp4U32(1)),
+      mp4FullBox(
+        "stsz", 0, 0, mp4U32(0), mp4U32(video.length),
+        mp4Table(video.map(sample => sample.data.length))
+      ),
+      mp4FullBox(
+        "stco", 0, 0, mp4U32(video.length),
+        mp4Table(videoOffsets.map(offset => base + offset))
+      )
+    );
+
+    const videoTrak = mp4Box(
+      "trak",
+      mp4FullBox(
+        "tkhd", 0, 3,
+        mp4U32(0), mp4U32(0), mp4U32(1), mp4U32(0), mp4U32(movieMs),
+        mp4Zeros(8), mp4U16(0), mp4U16(0), mp4U16(0), mp4U16(0),
+        MP4_MATRIX, mp4U32(width * 65536), mp4U32(height * 65536)
+      ),
+      mp4Box(
+        "mdia",
+        mp4FullBox(
+          "mdhd", 0, 0,
+          mp4U32(0), mp4U32(0), mp4U32(videoTimescale), mp4U32(videoDuration),
+          mp4U16(0x55C4), mp4U16(0)
+        ),
+        mp4FullBox(
+          "hdlr", 0, 0,
+          mp4U32(0), mp4Str("vide"), mp4Zeros(12),
+          [...("VideoHandler").split("").map(c => c.charCodeAt(0)), 0]
+        ),
+        mp4Box(
+          "minf",
+          mp4FullBox("vmhd", 0, 1, mp4Zeros(8)),
+          mp4Box("dinf", mp4FullBox("dref", 0, 0, mp4U32(1), mp4FullBox("url ", 0, 1))),
+          videoStbl
+        )
+      )
+    );
+
+    // --- piste audio ---
+    let audioTrak = new Uint8Array(0);
+
+    if (audio) {
+      const asc = Array.from(audio.asc);
+      const decoderSpecific = [0x05, asc.length, ...asc];
+      const decoderConfig = [
+        0x04, 13 + decoderSpecific.length,
+        0x40, 0x15, 0, 0, 0,
+        ...mp4U32(0), ...mp4U32(0),
+        ...decoderSpecific
+      ];
+      const slConfig = [0x06, 0x01, 0x02];
+      const esDescriptor = [
+        0x03, 3 + decoderConfig.length + slConfig.length,
+        ...mp4U16(0), 0x00,
+        ...decoderConfig, ...slConfig
+      ];
+
+      const mp4a = mp4Box(
+        "mp4a",
+        mp4Zeros(6), mp4U16(1),
+        mp4Zeros(8),
+        mp4U16(audio.channels), mp4U16(16), mp4U16(0), mp4U16(0),
+        mp4U32(audio.sampleRate * 65536),
+        mp4FullBox("esds", 0, 0, esDescriptor)
+      );
+
+      const audioStbl = mp4Box(
+        "stbl",
+        mp4FullBox("stsd", 0, 0, mp4U32(1), mp4a),
+        mp4FullBox("stts", 0, 0, mp4U32(1), mp4U32(audioFrames), mp4U32(1024)),
+        mp4FullBox("stsc", 0, 0, mp4U32(1), mp4U32(1), mp4U32(1), mp4U32(1)),
+        mp4FullBox(
+          "stsz", 0, 0, mp4U32(0), mp4U32(audioFrames),
+          mp4Table(audio.samples.map(sample => sample.length))
+        ),
+        mp4FullBox(
+          "stco", 0, 0, mp4U32(audioFrames),
+          mp4Table(audioOffsets.map(offset => base + offset))
+        )
+      );
+
+      audioTrak = mp4Box(
+        "trak",
+        mp4FullBox(
+          "tkhd", 0, 3,
+          mp4U32(0), mp4U32(0), mp4U32(2), mp4U32(0), mp4U32(audioMs),
+          mp4Zeros(8), mp4U16(0), mp4U16(0), mp4U16(0x0100), mp4U16(0),
+          MP4_MATRIX, mp4U32(0), mp4U32(0)
+        ),
+        mp4Box(
+          "mdia",
+          mp4FullBox(
+            "mdhd", 0, 0,
+            mp4U32(0), mp4U32(0), mp4U32(audio.sampleRate), mp4U32(audioDuration),
+            mp4U16(0x55C4), mp4U16(0)
+          ),
+          mp4FullBox(
+            "hdlr", 0, 0,
+            mp4U32(0), mp4Str("soun"), mp4Zeros(12),
+            [...("SoundHandler").split("").map(c => c.charCodeAt(0)), 0]
+          ),
+          mp4Box(
+            "minf",
+            mp4FullBox("smhd", 0, 0, mp4U16(0), mp4U16(0)),
+            mp4Box("dinf", mp4FullBox("dref", 0, 0, mp4U32(1), mp4FullBox("url ", 0, 1))),
+            audioStbl
+          )
+        )
+      );
+    }
+
+    return mp4Box(
+      "moov",
+      mp4FullBox(
+        "mvhd", 0, 0,
+        mp4U32(0), mp4U32(0), mp4U32(1000), mp4U32(movieMs),
+        mp4U32(0x00010000), mp4U16(0x0100), mp4Zeros(10),
+        MP4_MATRIX, mp4Zeros(24), mp4U32(audio ? 3 : 2)
+      ),
+      videoTrak,
+      audioTrak
+    );
+  }
+
+  const ftyp = mp4Box(
+    "ftyp",
+    mp4Str("isom"), mp4U32(512),
+    mp4Str("isom"), mp4Str("iso2"), mp4Str("avc1"), mp4Str("mp41")
+  );
+
+  // Première passe pour connaître la taille du moov, puis version finale
+  // avec les vrais décalages (le moov est placé AVANT les données).
+  const moovSize = buildMoov(0).length;
+  const base = ftyp.length + moovSize + 8;
+  const moov = buildMoov(base);
+
+  const mdatHeader = mp4Cat(mp4U32(mdatSize + 8), mp4Str("mdat"));
+
+  return {
+    parts: [ftyp, moov, mdatHeader, ...dataParts],
+    size: ftyp.length + moov.length + mdatHeader.length + mdatSize
+  };
+}
+
+// -- FIN MUXER --
+
+// ======================================
+// EXPORT MP4 : SIMULATION IMAGE PAR IMAGE + ENCODAGE
+// ======================================
+//
+// Contrairement à l'enregistrement direct, l'export ne dépend PAS de la
+// vitesse de l'ordinateur : chaque image est calculée puis encodée avec un
+// temps exact (1/30 s ou 1/60 s). Résultat : cadence parfaitement fixe,
+// son synchronisé, aucun saccade dans le fichier.
+// Utilise WebCodecs (Chrome, Edge, Android, Safari récents).
+
+let exporting = false;
+let exportCancel = false;
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+function webCodecsSupported() {
+  return !!(window.VideoEncoder && window.VideoFrame);
+}
+
+function toUint8(description) {
+  const view = description instanceof ArrayBuffer
+    ? new Uint8Array(description)
+    : new Uint8Array(description.buffer, description.byteOffset, description.byteLength);
+
+  return new Uint8Array(view);   // copie
+}
+
+// Cherche une configuration H.264 acceptée par ce navigateur.
+async function pickVideoConfig(width, height, fps, bitrate) {
+  const codecs = ["avc1.64002A", "avc1.4D002A", "avc1.42002A", "avc1.640028", "avc1.4D0028"];
+
+  for (const codec of codecs) {
+    const config = {
+      codec,
+      width,
+      height,
+      bitrate,
+      framerate: fps,
+      avc: { format: "avc" },
+      latencyMode: "quality"
+    };
+
+    try {
+      const result = await VideoEncoder.isConfigSupported(config);
+
+      if (result && result.supported) return config;
+    } catch (error) {
+      // on essaie la suite
+    }
+  }
+
+  return null;
+}
+
+// Fabrique la musique avec les passages "clair / étouffé" de l'export,
+// sans passer par les haut-parleurs (calcul instantané).
+async function renderMusicOffline(totalSeconds, fadeStart, events, sampleRate) {
+  const length = Math.ceil((totalSeconds + 0.1) * sampleRate);
+  const offline = new OfflineAudioContext(2, length, sampleRate);
+
+  const source = offline.createBufferSource();
+  source.buffer = musicBuffer;
+  source.loop = cfg.musicLoop;
+
+  const filters = [offline.createBiquadFilter(), offline.createBiquadFilter()];
+
+  for (const filter of filters) {
+    filter.type = "lowpass";
+    filter.Q.value = 0.7;
+  }
+
+  const gain = offline.createGain();
+
+  source.connect(filters[0]);
+  filters[0].connect(filters[1]);
+  filters[1].connect(gain);
+  gain.connect(offline.destination);
+
+  const baseVolume = cfg.musicVolume / 100;
+  const mutedVolume = cfg.muffleVolume / 100;
+
+  // Même logique que applyMusicState (démarre étouffé).
+  filters.forEach(filter => filter.frequency.setValueAtTime(cfg.muffleFreq, 0));
+  gain.gain.setValueAtTime(baseVolume * mutedVolume, 0);
+
+  for (const [time, clear] of events) {
+    const freq = clear ? CLEAR_FREQ : cfg.muffleFreq;
+    const volume = baseVolume * (clear ? 1 : mutedVolume);
+    const timeConstant = clear ? 0.04 : 0.07;
+
+    filters.forEach(filter => filter.frequency.setTargetAtTime(freq, time, timeConstant));
+    gain.gain.setTargetAtTime(volume, time, timeConstant);
+  }
+
+  // Fondu de fin, comme à l'écoute normale.
+  gain.gain.setTargetAtTime(0, fadeStart, 0.1);
+
+  const offset = clamp(cfg.musicOffset, 0, Math.max(0, musicBuffer.duration - 0.1));
+  source.start(0, offset);
+
+  const rendered = await offline.startRendering();
+
+  // Réglage "Décalage du son dans la vidéo" : appliqué ici avec exactitude.
+  const shiftFrames = Math.round(cfg.avOffset / 1000 * sampleRate);
+  const left = rendered.getChannelData(0);
+  const right = rendered.numberOfChannels > 1 ? rendered.getChannelData(1) : left;
+
+  if (shiftFrames === 0) return { left, right };
+
+  const outLength = rendered.length;
+  const outLeft = new Float32Array(outLength);
+  const outRight = new Float32Array(outLength);
+
+  for (let i = 0; i < outLength; i++) {
+    const from = i - shiftFrames;
+
+    if (from >= 0 && from < outLength) {
+      outLeft[i] = left[from];
+      outRight[i] = right[from];
+    }
+  }
+
+  return { left: outLeft, right: outRight };
+}
+
+// Encode la musique en AAC. Retourne null si le navigateur ne sait pas.
+async function encodeMusicAAC(totalSeconds, fadeStart, events) {
+  if (!window.AudioEncoder || !window.AudioData || !window.OfflineAudioContext) {
+    return null;
+  }
+
+  const sampleRate = 48000;
+
+  const config = {
+    codec: "mp4a.40.2",
+    sampleRate,
+    numberOfChannels: 2,
+    bitrate: 160000,
+    aac: { format: "aac" }
+  };
+
+  let support = null;
+
+  try {
+    support = await AudioEncoder.isConfigSupported(config);
+  } catch (error) {
+    return null;
+  }
+
+  if (!support || !support.supported) return null;
+
+  const pcm = await renderMusicOffline(totalSeconds, fadeStart, events, sampleRate);
+
+  const samples = [];
+  let asc = null;
+  let failure = null;
+
+  const encoder = new AudioEncoder({
+    output: (chunk, meta) => {
+      const data = new Uint8Array(chunk.byteLength);
+      chunk.copyTo(data);
+      samples.push(data);
+
+      if (!asc && meta && meta.decoderConfig && meta.decoderConfig.description) {
+        asc = toUint8(meta.decoderConfig.description);
+      }
+    },
+    error: error => { failure = error; }
+  });
+
+  encoder.configure(config);
+
+  const block = 4096;
+  const total = pcm.left.length;
+
+  for (let start = 0; start < total; start += block) {
+    const count = Math.min(block, total - start);
+    const planar = new Float32Array(count * 2);
+
+    planar.set(pcm.left.subarray(start, start + count), 0);
+    planar.set(pcm.right.subarray(start, start + count), count);
+
+    const data = new AudioData({
+      format: "f32-planar",
+      sampleRate,
+      numberOfFrames: count,
+      numberOfChannels: 2,
+      timestamp: Math.round(start * 1e6 / sampleRate),
+      data: planar
+    });
+
+    encoder.encode(data);
+    data.close();
+
+    if (failure) throw failure;
+
+    while (encoder.encodeQueueSize > 16) await sleep(1);
+  }
+
+  await encoder.flush();
+  encoder.close();
+
+  if (failure) throw failure;
+
+  if (!asc) asc = new Uint8Array(mp4AudioSpecificConfig(sampleRate, 2));
+
+  return { samples, sampleRate, channels: 2, asc };
+}
+
+function setUILocked(locked) {
+  if (!document.querySelectorAll) return;
+
+  document.querySelectorAll("input, select, button").forEach(element => {
+    if (element.id !== "exportBtn") element.disabled = locked;
+  });
+}
+
+async function exportVideo() {
+  // Deuxième clic pendant un export : annulation.
+  if (exporting) {
+    exportCancel = true;
+    return;
+  }
+
+  if (recording) {
+    updateStatus("Arrête d'abord l'enregistrement direct");
+    return;
+  }
+
+  if (!webCodecsSupported()) {
+    updateStatus("Export MP4 non pris en charge ici : utilise « Enreg. direct »");
+    return;
+  }
+
+  const button = document.getElementById("exportBtn");
+  const buttonLabel = button.textContent;
+
+  exporting = true;
+  exportCancel = false;
+
+  button.textContent = "Annuler l'export";
+  setUILocked(true);
+
+  // On arrête tout ce qui tourne et on repart de zéro, en gardant la
+  // disposition des trous actuellement affichée.
+  cancelAnimationFrame(animationFrame);
+  stopMusic();
+
+  exportMode = true;
+  exportEvents = [];
+
+  resetSimulation(true);
+  setRenderScale(previewScale);
+  keepAwake(true);
+
+  let encoder = null;
+
+  try {
+    const fps = Number(document.getElementById("fps").value) === 60 ? 60 : 30;
+    const width = canvas.width;
+    const height = canvas.height;
+
+    const bitrate = Math.round(
+      10e6 * (width * height) / (1080 * 1920) * (fps === 60 ? 1.6 : 1)
+    );
+
+    const videoConfig = await pickVideoConfig(width, height, fps, Math.max(3e6, bitrate));
+
+    if (!videoConfig) {
+      throw new Error("Ce navigateur ne sait pas encoder en H.264 à cette taille");
+    }
+
+    const samples = [];
+    let avcC = null;
+    let colorSpace = null;
+    let failure = null;
+    let lastTimestamp = -1;
+
+    encoder = new VideoEncoder({
+      output: (chunk, meta) => {
+        if (chunk.timestamp <= lastTimestamp) {
+          failure = new Error("Cet encodeur réordonne les images (non pris en charge)");
+        }
+
+        lastTimestamp = chunk.timestamp;
+
+        const data = new Uint8Array(chunk.byteLength);
+        chunk.copyTo(data);
+
+        samples.push({ data, key: chunk.type === "key", ts: chunk.timestamp });
+
+        if (meta && meta.decoderConfig) {
+          if (!avcC && meta.decoderConfig.description) {
+            avcC = toUint8(meta.decoderConfig.description);
+          }
+
+          if (meta.decoderConfig.colorSpace) {
+            colorSpace = meta.decoderConfig.colorSpace;
+          }
+        }
+      },
+      error: error => { failure = error; }
+    });
+
+    encoder.configure(videoConfig);
+
+    const frameTime = 1 / fps;
+    const holdFrames = Math.round(fps * 0.6);   // image finale + fondu du son
+    const maxFrames = Math.ceil((cfg.duration + 2) * fps);
+
+    let frameIndex = 0;
+    let holdCount = 0;
+    let animationEnd = null;
+
+    while (frameIndex < maxFrames) {
+      if (exportCancel) throw new Error("Export annulé");
+      if (failure) throw failure;
+
+      if (!finished) {
+        updatePhysics(frameTime);
+        updateZoomSpring(frameTime);
+        updateEffects(frameTime);
+
+        elapsed += frameTime;
+
+        if (!finished && elapsed >= cfg.duration) finishSimulation();
+
+        if (finished) animationEnd = elapsed;
+      } else {
+        holdCount++;
+      }
+
+      draw();
+
+      const frame = new VideoFrame(canvas, {
+        timestamp: Math.round(frameIndex * 1e6 / fps),
+        duration: Math.round(1e6 / fps)
+      });
+
+      while (encoder.encodeQueueSize > 8) await sleep(2);
+
+      encoder.encode(frame, { keyFrame: frameIndex % (fps * 2) === 0 });
+      frame.close();
+
+      frameIndex++;
+
+      if (finished && holdCount >= holdFrames) break;
+
+      if (frameIndex % 6 === 0) {
+        const percent = Math.min(
+          99,
+          Math.round(100 * Math.max(level / cfg.count, elapsed / cfg.duration))
+        );
+
+        updateStatus("Export en cours… " + percent + " % (garde cet onglet ouvert)");
+
+        await sleep(0);   // laisse le navigateur rafraîchir l'écran
+      }
+    }
+
+    await encoder.flush();
+    encoder.close();
+    encoder = null;
+
+    if (failure) throw failure;
+    if (!avcC) throw new Error("Encodage vidéo incomplet");
+
+    // ---- son ----
+    let audio = null;
+    let audioNote = "";
+
+    if (musicBuffer) {
+      updateStatus("Export : préparation du son…");
+
+      const totalSeconds = frameIndex / fps;
+
+      audio = await encodeMusicAAC(
+        totalSeconds,
+        animationEnd === null ? totalSeconds : animationEnd,
+        exportEvents
+      );
+
+      if (!audio) audioNote = " (son non pris en charge ici : vidéo sans musique)";
+    }
+
+    updateStatus("Export : assemblage du fichier…");
+    await sleep(0);
+
+    const mp4 = buildMP4({ width, height, fps, video: samples, avcC, colorSpace, audio });
+    const blob = new Blob(mp4.parts, { type: "video/mp4" });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = "ring-animation.mp4";
+
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+
+    if (typeof File === "function") {
+      lastVideoFile = new File([blob], "ring-animation.mp4", { type: "video/mp4" });
+      updateShareButton();
+    }
+
+    const megabytes = (mp4.size / 1048576).toFixed(1);
+
+    updateStatus(
+      "Export terminé : MP4 " + fps + " images/s, " + megabytes + " Mo" + audioNote
+    );
+  } catch (error) {
+    if (encoder) {
+      try { encoder.close(); } catch (closeError) { /* déjà fermé */ }
+    }
+
+    updateStatus(
+      error && error.message === "Export annulé"
+        ? "Export annulé"
+        : "Échec de l'export : " + (error && error.message ? error.message : error)
+    );
+  } finally {
+    exportMode = false;
+    exporting = false;
+    exportCancel = false;
+
+    button.textContent = buttonLabel;
+    setUILocked(false);
+
+    const status = document.getElementById("status").textContent;
+
+    resetSimulation(true);
+    keepAwake(false);
+
+    updateStatus(status);
+  }
 }
 
 // ======================================
@@ -2908,6 +3709,16 @@ document.getElementById("recordBtn").addEventListener(
   "click",
   startRecording
 );
+
+document.getElementById("exportBtn").addEventListener("click", exportVideo);
+
+// Navigateur sans WebCodecs : on garde seulement l'enregistrement direct.
+if (!webCodecsSupported()) {
+  document.getElementById("exportBtn").hidden = true;
+  document.getElementById("fpsLabel").hidden = true;
+  document.getElementById("recordBtn").textContent = "Enregistrer";
+  document.getElementById("recordBtn").title = "Enregistre en temps réel";
+}
 
 // ======================================
 // INITIALISATION
