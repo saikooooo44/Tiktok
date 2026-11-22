@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -796,6 +795,9 @@ let animationFrame = null;
 let recorder = null;
 let recordedChunks = [];
 let recording = false;
+let recordStopReason = "";  // message affiché si l'enregistrement est interrompu
+let lastFrameWall = 0;        // instant (ms) du dernier dessin réel
+let watchdogTimer = null;
 
 // ======================================
 // OUTILS
@@ -2384,6 +2386,7 @@ function animate(timestamp) {
     draw();
     adaptPreviewQuality(performance.now() - t0);
     lastDrawTime = timestamp;
+    lastFrameWall = performance.now();
   }
 
   animationFrame = requestAnimationFrame(animate);
@@ -2499,6 +2502,53 @@ function finishSimulation() {
 // ENREGISTREMENT VIDÉO
 // ======================================
 
+// ---- Sécurité d'enregistrement ----
+// Si l'image cesse de se mettre à jour (écran verrouillé, appli en arrière-plan,
+// navigateur qui suspend la page), on arrête l'enregistrement tout de suite.
+// Sinon le son continue seul dans le fichier.
+function startWatchdog() {
+  stopWatchdog();
+  lastFrameWall = performance.now();
+
+  watchdogTimer = setInterval(() => {
+    if (!recording || !running) return;
+
+    if (performance.now() - lastFrameWall > 1000) {
+      abortRecording("Enregistrement arrêté : l'image ne se mettait plus à jour");
+    }
+  }, 250);
+}
+
+function stopWatchdog() {
+  if (watchdogTimer) {
+    clearInterval(watchdogTimer);
+    watchdogTimer = null;
+  }
+}
+
+// Arrête l'animation, la musique et l'enregistrement ensemble, pour que
+// la vidéo et le son finissent au même instant.
+function abortRecording(reason) {
+  if (!recording) return;
+
+  recordStopReason = reason;
+
+  running = false;
+  paused = false;
+  finished = true;
+
+  cancelAnimationFrame(animationFrame);
+  clearTimeout(leadTimer);
+  leadTimer = null;
+
+  stopMusic();
+  stopWatchdog();
+
+  if (recorder && recorder.state !== "inactive") {
+    recorder.stop();
+  }
+}
+
 function startRecording() {
   if (!canvas.captureStream || !window.MediaRecorder) {
     updateStatus("Enregistrement non pris en charge par ce navigateur");
@@ -2553,6 +2603,7 @@ function startRecording() {
 
   recordedChunks = [];
   recording = true;
+  recordStopReason = "";
   lastVideoFile = null;
   updateShareButton();
 
@@ -2586,11 +2637,19 @@ function startRecording() {
     }
 
     recording = false;
+    stopWatchdog();
     setRenderScale(previewScale);
-    updateStatus("Vidéo enregistrée (" + extension.toUpperCase() + ")");
+
+    if (recordStopReason) {
+      updateStatus(recordStopReason + " (vidéo sauvegardée jusqu'à ce moment)");
+      recordStopReason = "";
+    } else {
+      updateStatus("Vidéo enregistrée (" + extension.toUpperCase() + ")");
+    }
   };
 
   recorder.start();
+  startWatchdog();
 
   if (!running) {
     startSimulation();
@@ -3410,6 +3469,11 @@ async function keepAwake(on) {
 
 if (typeof document.addEventListener === "function") {
   document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden" && recording) {
+      abortRecording("Enregistrement arrêté : l'appli a été mise en arrière-plan");
+      return;
+    }
+
     if (document.visibilityState === "visible" && running && !paused) {
       keepAwake(true);
     }
