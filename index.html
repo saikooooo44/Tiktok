@@ -248,6 +248,31 @@ button.record {
   text-align: center;
 }
 
+/* Sauvegarde des réglages */
+.preset-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.control label.file-button {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 0;
+  border-radius: 7px;
+  padding: 10px 4px;
+  font-weight: bold;
+  font-size: 12px;
+  color: white;
+  background: #3c414e;
+  cursor: pointer;
+}
+
+.file-button input {
+  display: none;
+}
+
 /* Placement explicite des 3 colonnes (ordre du HTML : centre d'abord). */
 .panels {
   display: contents;
@@ -680,6 +705,40 @@ button {
       <div class="control">
         <label><span>Boucler la musique</span><input id="musicLoop" type="checkbox" checked></label>
       </div>
+    </details>
+
+    <details open>
+      <summary>Sauvegarde des réglages</summary>
+
+      <div class="control">
+        <label>Nom du réglage</label>
+        <input id="presetName" type="text" placeholder="Ex : refrain doux">
+      </div>
+
+      <div class="control">
+        <button id="presetSave" type="button" class="shuffle" style="width:100%">Sauvegarder ces réglages</button>
+      </div>
+
+      <div class="control">
+        <label>Réglages sauvegardés</label>
+        <select id="presetSelect"></select>
+      </div>
+
+      <div class="control preset-buttons">
+        <button id="presetLoad" type="button" class="secondary">Charger</button>
+        <button id="presetDelete" type="button" class="secondary">Supprimer</button>
+      </div>
+
+      <div class="control preset-buttons">
+        <button id="presetExport" type="button" class="secondary">Exporter</button>
+        <label class="file-button">Importer<input id="presetImport" type="file" accept="application/json,.json"></label>
+      </div>
+
+      <div class="control">
+        <button id="presetDefault" type="button" class="secondary" style="width:100%">Réglages d'origine</button>
+      </div>
+
+      <div class="status" id="presetStatus" style="text-align:left;"></div>
     </details>
 
   </aside>
@@ -3789,6 +3848,241 @@ if (!webCodecsSupported()) {
 generateStars();
 setRenderScale(previewScale);
 resetSimulation();
+
+// ======================================
+// SAUVEGARDE DES RÉGLAGES
+// ======================================
+// Les réglages sont stockés dans le navigateur (localStorage) : ils restent
+// après fermeture, sur cet appareil. Chaque changement est sauvegardé
+// automatiquement comme « dernier réglage », et il est rechargé au démarrage.
+
+const SETTING_KEYS = [
+  "count", "ballSize", "speed", "gap", "spacing", "stroke", "rotation",
+  "directionMode", "groupMin", "groupMax", "centerRadius", "drift", "jitter",
+  "offset", "zoom", "duration",
+  "musicVolume", "muffleVolume", "muffleFreq", "musicOffset", "musicLoop", "avOffset",
+  "effects", "useGPU",
+  "colorMode", "gradNear", "gradMid", "gradFar",
+  "bgColor", "ringColor", "activeColor", "ballColor", "glowColor"
+];
+
+const STORAGE_PRESETS = "ringBounce:presets";
+const STORAGE_LAST = "ringBounce:last";
+
+function readSettings() {
+  const settings = {};
+
+  SETTING_KEYS.forEach(key => {
+    settings[key] = cfg[key];
+  });
+
+  settings.quality = document.getElementById("quality").value;
+  settings.fps = document.getElementById("fps").value;
+
+  return settings;
+}
+
+// Applique des réglages comme si l'utilisateur les avait saisis : on
+// déclenche les mêmes événements que les curseurs, donc tout se met à jour.
+function applySettings(settings) {
+  SETTING_KEYS.forEach(key => {
+    if (!(key in settings)) return;
+
+    const el = document.getElementById(key);
+
+    if (!el) return;
+
+    if (el.type === "checkbox") {
+      el.checked = !!settings[key];
+      el.dispatchEvent(new Event("change"));
+    } else if (el.tagName === "SELECT") {
+      el.value = String(settings[key]);
+      el.dispatchEvent(new Event("change"));
+    } else {
+      el.value = String(settings[key]);
+      el.dispatchEvent(new Event("input"));
+    }
+  });
+
+  if (settings.quality !== undefined) {
+    const quality = document.getElementById("quality");
+
+    quality.value = String(settings.quality);
+    quality.dispatchEvent(new Event("change"));
+  }
+
+  if (settings.fps !== undefined) {
+    document.getElementById("fps").value = String(settings.fps);
+  }
+}
+
+function readStore(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+
+    return raw ? JSON.parse(raw) : fallback;
+  } catch (error) {
+    return fallback;
+  }
+}
+
+function writeStore(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+let autoSaveTimer = null;
+
+function scheduleAutoSave() {
+  clearTimeout(autoSaveTimer);
+
+  autoSaveTimer = setTimeout(() => {
+    writeStore(STORAGE_LAST, readSettings());
+  }, 300);
+}
+
+document.addEventListener("input", scheduleAutoSave);
+document.addEventListener("change", scheduleAutoSave);
+
+const presetSelect = document.getElementById("presetSelect");
+const presetStatus = document.getElementById("presetStatus");
+
+function setPresetStatus(text) {
+  presetStatus.textContent = text;
+}
+
+function refreshPresetList(selectedName) {
+  const presets = readStore(STORAGE_PRESETS, {});
+  const names = Object.keys(presets);
+
+  presetSelect.textContent = "";
+
+  if (!names.length) {
+    const option = document.createElement("option");
+
+    option.value = "";
+    option.textContent = "Aucun réglage sauvegardé";
+    presetSelect.appendChild(option);
+    return;
+  }
+
+  names.forEach(name => {
+    const option = document.createElement("option");
+
+    option.value = name;
+    option.textContent = name;
+    option.selected = name === selectedName;
+    presetSelect.appendChild(option);
+  });
+}
+
+// Réglages d'origine : ceux du fichier, pris avant de charger la sauvegarde.
+const defaultSettings = readSettings();
+
+document.getElementById("presetSave").addEventListener("click", () => {
+  const name = document.getElementById("presetName").value.trim();
+
+  if (!name) {
+    setPresetStatus("Donne un nom à ce réglage.");
+    return;
+  }
+
+  const presets = readStore(STORAGE_PRESETS, {});
+
+  presets[name] = readSettings();
+
+  if (!writeStore(STORAGE_PRESETS, presets)) {
+    setPresetStatus("Impossible d'enregistrer dans ce navigateur.");
+    return;
+  }
+
+  refreshPresetList(name);
+  setPresetStatus("Réglage « " + name + " » sauvegardé.");
+});
+
+document.getElementById("presetLoad").addEventListener("click", () => {
+  const name = presetSelect.value;
+  const presets = readStore(STORAGE_PRESETS, {});
+
+  if (!name || !presets[name]) {
+    setPresetStatus("Aucun réglage à charger.");
+    return;
+  }
+
+  applySettings(presets[name]);
+  setPresetStatus("Réglage « " + name + " » chargé.");
+});
+
+document.getElementById("presetDelete").addEventListener("click", () => {
+  const name = presetSelect.value;
+  const presets = readStore(STORAGE_PRESETS, {});
+
+  if (!name || !presets[name]) {
+    setPresetStatus("Aucun réglage à supprimer.");
+    return;
+  }
+
+  delete presets[name];
+  writeStore(STORAGE_PRESETS, presets);
+  refreshPresetList();
+  setPresetStatus("Réglage « " + name + " » supprimé.");
+});
+
+document.getElementById("presetExport").addEventListener("click", () => {
+  const data = JSON.stringify(
+    { app: "ring-bounce", version: 1, settings: readSettings() },
+    null,
+    2
+  );
+
+  const url = URL.createObjectURL(new Blob([data], { type: "application/json" }));
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = "reglages-ring-bounce.json";
+
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  setPresetStatus("Fichier de réglages téléchargé.");
+});
+
+document.getElementById("presetImport").addEventListener("change", async e => {
+  const file = e.target.files && e.target.files[0];
+
+  e.target.value = "";
+
+  if (!file) return;
+
+  try {
+    const data = JSON.parse(await file.text());
+    const settings = data && data.settings ? data.settings : data;
+
+    if (!settings || typeof settings !== "object") throw new Error("format");
+
+    applySettings(settings);
+    setPresetStatus("Réglages importés depuis « " + file.name + " ».");
+  } catch (error) {
+    setPresetStatus("Fichier de réglages invalide.");
+  }
+});
+
+document.getElementById("presetDefault").addEventListener("click", () => {
+  applySettings(defaultSettings);
+  setPresetStatus("Réglages d'origine rétablis.");
+});
+
+refreshPresetList();
+
+const lastSettings = readStore(STORAGE_LAST, null);
+
+if (lastSettings) applySettings(lastSettings);
 
 </script>
 </body>
