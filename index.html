@@ -3165,10 +3165,6 @@ async function encodeMusicAAC(totalSeconds, fadeStart, events) {
       const data = new Uint8Array(chunk.byteLength);
       chunk.copyTo(data);
       samples.push(data);
-
-      if (!asc && meta && meta.decoderConfig && meta.decoderConfig.description) {
-        asc = toUint8(meta.decoderConfig.description);
-      }
     },
     error: error => { failure = error; }
   });
@@ -3207,7 +3203,9 @@ async function encodeMusicAAC(totalSeconds, fadeStart, events) {
 
   if (failure) throw failure;
 
-  if (!asc) asc = new Uint8Array(mp4AudioSpecificConfig(sampleRate, 2));
+  // Configuration AAC fabriquée ici (AAC-LC, 48 kHz, stéréo = octets 11 90).
+  // On n'utilise pas celle du navigateur : elle est au format esds et casse la lecture.
+  asc = new Uint8Array(mp4AudioSpecificConfig(sampleRate, 2));
 
   return { samples, sampleRate, channels: 2, asc };
 }
