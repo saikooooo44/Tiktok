@@ -469,7 +469,7 @@ button {
 
       <div class="control">
         <label>Nombre de cercles <span id="countValue">600</span></label>
-        <input id="count" type="range" min="10" max="3000" value="600">
+        <input id="count" type="range" min="10" max="10000" value="600">
       </div>
 
       <div class="control">
@@ -503,12 +503,12 @@ button {
 
       <div class="control">
         <label>Paquet : cercles minimum <span id="groupMinValue">15</span></label>
-        <input id="groupMin" type="range" min="1" max="100" value="15">
+        <input id="groupMin" type="range" min="1" max="1000" value="15">
       </div>
 
       <div class="control">
         <label>Paquet : cercles maximum <span id="groupMaxValue">45</span></label>
-        <input id="groupMax" type="range" min="1" max="100" value="45">
+        <input id="groupMax" type="range" min="1" max="1000" value="45">
       </div>
 
       <div class="control">
@@ -854,11 +854,12 @@ let syncManualTimes = [];    // instants saisis à la main
 let syncQueue = [];          // instants retenus, en temps de simulation
 let syncEvIdx = 0;           // prochain événement non traité
 let syncPlan = null;         // passage visé { idx, ev, hitT }
-let syncStats = { total: 0, hits: 0 };
+let syncStats = { total: 0, hits: 0, errSum: 0 };
 let simSeedState = 0;        // générateur déterministe des collisions
 let simAccum = 0;            // temps réel non encore simulé (pas fixes)
 let departure = null;        // état de départ de la balle (sert à l'export)
 let lastSyncInfo = 0;
+let syncLayoutSig = null;   // tailles de paquets utilisées pour le dernier tirage
 let exportMode = false;      // true pendant l'export MP4 image par image
 let exportEvents = [];       // [temps, son clair ?] enregistrés pendant l'export
 let shift = 0;
@@ -939,6 +940,7 @@ function generateRingOffsets() {
 
   const lo = Math.min(cfg.groupMin, cfg.groupMax);
   const hi = Math.max(cfg.groupMin, cfg.groupMax);
+  const sizes = syncGroupSizes();
 
   let i = 0;
   let group = 0;
@@ -948,7 +950,7 @@ function generateRingOffsets() {
   // le paquet) et l'irrégularité (aléa par cercle) donnent les bords
   // en escalier / en spirale.
   while (i < cfg.count) {
-    const size = Math.floor(random(lo, hi + 1));
+    const size = sizes ? sizes[group] : Math.floor(random(lo, hi + 1));
     const groupOffset = Math.random() * TAU;
 
     for (let k = 0; k < size && i < cfg.count; k++, i++) {
@@ -1056,7 +1058,7 @@ function resetSimulation(keepLayout) {
   simSeedState = SIM_SEED;
   simAccum = 0;
   syncPlan = null;
-  syncStats = { total: 0, hits: 0 };
+  syncStats = { total: 0, hits: 0, errSum: 0 };
   syncEvIdx = 0;
   groupSync.fill(0);
   groupSyncRate.fill(0);
@@ -1074,6 +1076,7 @@ function resetSimulation(keepLayout) {
 
   updateStatus("Prêt à démarrer");
   updateCounter();
+  updateGroupControls();
   draw();
 }
 
@@ -1249,94 +1252,51 @@ function chordTime(px, py, vx, vy, R) {
   return t > 0 ? t : null;
 }
 
-// Simule les prochains impacts sur l'anneau actif, en supposant que la
-// balle rebondit à chacun (c'est le cas tant qu'aucun trou ne se présente).
-// Le rebond reprend exactement la logique de handleCrossing, avec l'aléa
-// copié : la prévision est donc celle que le jeu obtiendra réellement.
-function forecastHits(index, maxHits, horizon) {
-  const R = baseRadius(index);
-  const sd = R - Math.max(0.5, cfg.spacing * 0.08);
+// Prochain impact de la balle sur l'anneau actif (droite entre deux
+// rebonds, donc calcul exact).
+function predictHit(index) {
+  const t = chordTime(ball.x, ball.y, ball.vx, ball.vy, baseRadius(index));
 
-  let px = ball.x, py = ball.y, vx = ball.vx, vy = ball.vy;
-  let s = simSeedState;
-  let tc = 0;
-  const out = [];
+  if (t === null) return null;
 
-  for (let k = 0; k < maxHits; k++) {
-    const dh = chordTime(px, py, vx, vy, R);
-    if (dh === null) break;
+  const hx = ball.x + ball.vx * t;
+  const hy = ball.y + ball.vy * t;
 
-    tc += dh;
-    if (tc > horizon) break;
-
-    const hx = px + vx * dh;
-    const hy = py + vy * dh;
-
-    out.push({ t: elapsed + tc, angle: Math.atan2(hy, hx) });
-
-    // Rebond (même calcul que handleCrossing).
-    const dist = Math.hypot(hx, hy);
-    const nx = hx / dist;
-    const ny = hy / dist;
-    const dot = vx * nx + vy * ny;
-
-    if (dot > 0) {
-      vx -= 2 * dot * nx;
-      vy -= 2 * dot * ny;
-    }
-
-    const r = rngNext(s);
-    s = r.s;
-
-    const speed = Math.hypot(vx, vy);
-    const angle = Math.atan2(vy, vx) + (r.v * 40 - 20) * DEG;
-
-    vx = Math.cos(angle) * speed;
-    vy = Math.sin(angle) * speed;
-
-    px = nx * sd;
-    py = ny * sd;
-  }
-
-  return out;
+  return { t: elapsed + t, angle: Math.atan2(hy, hx) };
 }
 
-// Choisit le prochain passage à synchroniser : le premier événement (dans
-// l'ordre du temps, parmi les N prochains) qui a un impact prévu à moins
-// de la tolérance ET dont le trou peut atteindre la bonne position à
-// temps, avec la vitesse de correction autorisée.
-function choosePlan(index, tolS) {
-  const lim = syncLimits();
-  const g = ringGroups[index];
-  const cur = groupSync[g] || 0;
-  const hits = forecastHits(index, 40, 1.5);
-  const end = Math.min(syncQueue.length, syncEvIdx + cfg.syncAhead);
+// Taille des paquets imposée par la détection : chaque paquet couvre la
+// partie de la musique comprise entre deux événements et reçoit des
+// anneaux proportionnels à sa durée. La somme vaut toujours cfg.count.
+function syncGroupSizes() {
+  if (!cfg.syncEnabled || !syncQueue.length) return null;
 
-  for (let j = syncEvIdx; j < end; j++) {
-    const ev = syncQueue[j];
-    let best = null;
+  const edges = [0];
 
-    for (const h of hits) {
-      const diff = Math.abs(h.t - ev);
-
-      if (diff > tolS) continue;
-
-      const T = h.t - elapsed;
-      const target = h.angle - gapBaseForRing(index, h.t);
-      const err = angleDifference(target, cur);
-
-      // Hors de portée : il faudrait tourner plus vite que la limite.
-      if (Math.abs(err) > lim.maxRate * T * 0.9) continue;
-
-      if (!best || diff < best.diff) {
-        best = { idx: j, t: h.t, err, diff };
-      }
-    }
-
-    if (best) return best;
+  for (const t of syncQueue) {
+    if (t > 0 && t < cfg.duration) edges.push(t);
   }
 
-  return null;
+  edges.push(cfg.duration);
+
+  const n = edges.length - 1;
+
+  if (cfg.count < n) return null;
+
+  const sizes = new Array(n);
+  let total = 0;
+
+  for (let k = 0; k < n; k++) {
+    sizes[k] = Math.max(1, Math.round(cfg.count * (edges[k + 1] - edges[k]) / cfg.duration));
+    total += sizes[k];
+  }
+
+  // Arrondis : on corrige sur le dernier paquet, sinon on revient au hasard.
+  sizes[n - 1] += cfg.count - total;
+
+  if (sizes[n - 1] < 1) return null;
+
+  return sizes;
 }
 
 // Déplace la correction d'un paquet vers une vitesse cible, sans
@@ -1375,40 +1335,73 @@ function syncStep(dt) {
   }
 
   const L = level;
-  const plan = cfg.syncEnabled && L < cfg.count && syncEvIdx < syncQueue.length
-    ? choosePlan(L, tolS)
+  const hit = cfg.syncEnabled && L < cfg.count && syncEvIdx < syncQueue.length
+    ? predictHit(L)
     : null;
 
-  // Aucun passage à viser : rotation naturelle, les corrections s'éteignent.
-  if (!plan) {
+  // Parmi les N prochains événements, on retient le plus proche du prochain impact.
+  let best = -1;
+  let bestDiff = Infinity;
+
+  if (hit) {
+    const end = Math.min(syncQueue.length, syncEvIdx + cfg.syncAhead);
+
+    for (let j = syncEvIdx; j < end; j++) {
+      const diff = Math.abs(syncQueue[j] - hit.t);
+
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        best = j;
+      }
+    }
+  }
+
+  // Aucun événement assez proche : pas de correction, rotation naturelle.
+  if (best < 0 || bestDiff > tolS) {
     syncPlan = null;
     relaxSync(dt, -1);
     return;
   }
 
-  syncPlan = { idx: plan.idx, ev: syncQueue[plan.idx], hitT: plan.t };
+  syncPlan = { idx: best, ev: syncQueue[best], hitT: hit.t };
 
-  // Vitesse de correction pour arriver à l'angle voulu juste à temps,
-  // bornée par l'intensité. L'accélération est limitée dans moveGroupSync.
+  // Le centre du trou doit être sur la balle au moment de l'impact.
   const g = ringGroups[L];
   const lim = syncLimits();
-  const T = Math.max(0.02, plan.t - elapsed);
-  const desired = clamp(plan.err / T, -lim.maxRate, lim.maxRate);
+  const target = hit.angle - gapBaseForRing(L, hit.t);
+  const err = angleDifference(target, groupSync[g] || 0);
+  const T = Math.max(0.02, hit.t - elapsed);
+  const desired = clamp(err / T, -lim.maxRate, lim.maxRate);
 
   moveGroupSync(g, desired, dt, lim.maxAcc);
   relaxSync(dt, g);
 }
 
-// Appelé quand la balle franchit un trou.
+// Appelé juste après le passage (level a déjà été incrémenté). Le passage
+// ne valide qu'un événement musical proche (dans la tolérance) et non encore
+// traité : un passage d'un autre anneau ou hors tolérance ne compte pas.
 function registerSyncPass() {
-  if (!syncPlan) return;
-
   const tolS = cfg.syncTolerance / 1000;
+  const end = Math.min(syncQueue.length, syncEvIdx + cfg.syncAhead + 1);
 
-  if (Math.abs(elapsed - syncPlan.ev) <= tolS) {
-    syncStats.total += syncPlan.idx + 1 - syncEvIdx;
+  let found = -1;
+  let bestDiff = Infinity;
+
+  for (let j = syncEvIdx; j < end; j++) {
+    const diff = Math.abs(syncQueue[j] - elapsed);
+
+    if (diff <= tolS && diff < bestDiff) {
+      bestDiff = diff;
+      found = j;
+    }
+  }
+
+  if (found >= 0) {
+    // Les événements sautés avant celui-ci restent manqués.
+    syncStats.total += found + 1 - syncEvIdx;
     syncStats.hits++;
-    syncEvIdx = syncPlan.idx + 1;
+    syncStats.errSum += bestDiff;
+    syncEvIdx = found + 1;
   }
 
   syncPlan = null;
@@ -1562,7 +1555,33 @@ function refreshSyncEvents() {
 
   syncMusicEvents = mergeEventTimes(auto, manual);
   rebuildSyncQueue();
+
+  // Les anneaux ne sont regénérés que si les paquets changent (pas à
+  // chaque mouvement de curseur), et jamais pendant l'animation.
+  const sig = (syncGroupSizes() || []).join(",");
+
+  if (sig !== syncLayoutSig && !running) {
+    syncLayoutSig = sig;
+    generateRingOffsets();
+  }
+
+  updateGroupControls();
   updateSyncInfo();
+}
+
+// Avec la synchronisation, la taille des paquets vient de la détection :
+// les curseurs de paquets sont alors désactivés.
+// Les réglages qui changent la disposition des trous (nombre de cercles,
+// paquets) régénèrent les angles : pendant une animation, cela déplacerait
+// tous les trous d'un coup et effacerait les corrections de synchronisation.
+// Ils sont donc verrouillés pendant l'animation et réactivés à l'arrêt.
+function updateGroupControls() {
+  const syncLocked = cfg.syncEnabled && syncQueue.length > 0;
+  const layoutLocked = running;
+
+  document.getElementById("count").disabled = layoutLocked;
+  document.getElementById("groupMin").disabled = layoutLocked || syncLocked;
+  document.getElementById("groupMax").disabled = layoutLocked || syncLocked;
 }
 
 function updateSyncInfo() {
@@ -1580,9 +1599,21 @@ function updateSyncInfo() {
     return;
   }
 
-  el.textContent =
-    syncMusicEvents.length + " événements détectés · passages synchronisés : " +
-    syncStats.hits + " / " + syncStats.total;
+  const missed = syncStats.total - syncStats.hits;
+  const avgMs = syncStats.hits ? Math.round(1000 * syncStats.errSum / syncStats.hits) : null;
+
+  let text =
+    syncMusicEvents.length + " événements détectés · réussis : " +
+    syncStats.hits + " · manqués : " + missed +
+    (avgMs !== null ? " · écart moyen : " + avgMs + " ms" : "");
+
+  if (syncPlan) {
+    text += " · passage visé à " + syncPlan.hitT.toFixed(2) + " s";
+  } else if (syncEvIdx < syncQueue.length) {
+    text += " · prochain événement à " + syncQueue[syncEvIdx].toFixed(2) + " s";
+  }
+
+  el.textContent = text;
 }
 
 function updatePhysics(dt) {
@@ -2302,7 +2333,13 @@ function uploadRingData(g) {
   g.dataKey = key;
 
   const rows = Math.max(1, Math.ceil(cfg.count / DATA_TEX_WIDTH));
-  const data = new Uint8Array(DATA_TEX_WIDTH * rows * 4);
+
+  // Tampon réutilisé tant que la taille ne change pas.
+  if (!g.data || g.data.length !== DATA_TEX_WIDTH * rows * 4) {
+    g.data = new Uint8Array(DATA_TEX_WIDTH * rows * 4);
+  }
+
+  const data = g.data;
 
   for (let i = 0; i < cfg.count; i++) {
     let base =
@@ -2946,6 +2983,7 @@ function startSimulation() {
   paused = false;
   lastTime = 0;
 
+  updateGroupControls();
   startMusic();
   keepAwake(true);
 
@@ -3001,6 +3039,7 @@ function finishSimulation() {
   running = false;
   paused = false;
   finished = true;
+  updateGroupControls();
 
   cancelAnimationFrame(animationFrame);
 
@@ -3059,6 +3098,7 @@ function abortRecording(reason) {
   running = false;
   paused = false;
   finished = true;
+  updateGroupControls();
 
   cancelAnimationFrame(animationFrame);
   clearTimeout(leadTimer);
@@ -3842,7 +3882,9 @@ async function exportVideo() {
     encoder.configure(videoConfig);
 
     const frameTime = 1 / fps;
-    const stepsPerFrame = Math.round(frameTime / SIM_DT);
+    // Accumulateur : chaque image avance exactement 1/fps de simulation,
+    // quelle que soit la valeur de SIM_DT (pas de dérive de cadence).
+    let simRemainder = 0;
     const holdFrames = Math.round(fps * 0.6);   // image finale + fondu du son
     const maxFrames = Math.ceil((cfg.duration + 2) * fps);
 
@@ -3855,8 +3897,11 @@ async function exportVideo() {
       if (failure) throw failure;
 
       if (!finished) {
-        for (let s = 0; s < stepsPerFrame && !finished; s++) {
+        simRemainder += frameTime;
+
+        while (simRemainder >= SIM_DT - 1e-9 && !finished) {
           simStep(SIM_DT);
+          simRemainder -= SIM_DT;
 
           if (elapsed >= cfg.duration) finishSimulation();
         }
@@ -4054,6 +4099,13 @@ function bindRange(id, key, displayId, formatter = v => v) {
   const display = document.getElementById(displayId);
 
   input.addEventListener("input", () => {
+    // Nombre de cercles : jamais modifié pendant une animation (les tableaux
+    // de trous ont la taille de l'ancien nombre).
+    if (key === "count" && running) {
+      input.value = cfg.count;
+      return;
+    }
+
     cfg[key] = Number(input.value);
 
     if (display) {
@@ -4106,6 +4158,7 @@ bindRange("duration", "duration", "durationValue");
       }
     }
 
+    if (running) return;   // verrouillé pendant l'animation
     generateRingOffsets();
     draw();
   });
