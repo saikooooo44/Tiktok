@@ -408,6 +408,71 @@ button {
     min-width: 0;
   }
 }
+/* ===== TÉLÉPHONE : onglets au lieu des rubriques à déplier ===== */
+.tabs {
+  display: none;
+}
+
+@media (max-width: 1050px) {
+  .tabs {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: #111318;
+    padding: 2px 0 8px;
+    scrollbar-width: none;
+  }
+
+  .tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tab {
+    flex: 0 0 auto;
+    min-height: 42px;
+    padding: 8px 16px;
+    border-radius: 21px;
+    background: #2a2e38;
+    color: #cfcfcf;
+    font-size: 14px;
+    white-space: nowrap;
+  }
+
+  .tab.active {
+    background: #6254d9;
+    color: #fff;
+  }
+
+  .side {
+    background: none;
+    border: 0;
+    border-radius: 0;
+    padding: 0;
+    margin: 0;
+    overflow: visible;
+  }
+
+  .side details {
+    display: none;
+    margin: 0 0 8px;
+    padding: 10px 12px 12px;
+    background: #1d2028;
+    border: 1px solid #343844;
+    border-radius: 12px;
+  }
+
+  .side details.active {
+    display: block;
+  }
+
+  /* Le nom de la rubrique est dans l'onglet : pas besoin de la répéter. */
+  .side summary {
+    display: none;
+  }
+}
 </style>
 </head>
 
@@ -456,10 +521,13 @@ button {
 
     <div class="status" id="gpuInfo"></div>
     <div class="status" id="status">Prêt à démarrer</div>
+    <div class="status" id="saveStatus"></div>
+    <button id="resetSettingsBtn" class="secondary" type="button" title="Efface les réglages mémorisés et revient aux valeurs de départ">Réglages par défaut</button>
 
   </main>
 
   <div class="panels">
+    <nav class="tabs" id="tabs" aria-label="Rubriques de réglages"></nav>
 
   <!-- ============ GAUCHE : cercles et trous ============ -->
   <aside class="side left">
@@ -682,64 +750,6 @@ button {
       </div>
     </details>
 
-    <details open>
-      <summary>Synchronisation musicale</summary>
-
-      <div class="control">
-        <label><span>Activer la synchronisation</span><input id="syncEnabled" type="checkbox" checked></label>
-      </div>
-
-      <div class="control">
-        <label>Source des événements</label>
-        <select id="syncSource">
-          <option value="both" selected>Automatique + manuel</option>
-          <option value="auto">Automatique (grosse caisse)</option>
-          <option value="manual">Manuel uniquement</option>
-        </select>
-      </div>
-
-      <div class="control">
-        <label>Niveau de correction</label>
-        <select id="syncLevel">
-          <option value="30">Faible</option>
-          <option value="60" selected>Moyen</option>
-          <option value="100">Fort</option>
-        </select>
-      </div>
-
-      <div class="control">
-        <label>Intensité <span id="syncIntensityValue">60</span></label>
-        <input id="syncIntensity" type="range" min="0" max="100" value="60">
-      </div>
-
-      <div class="control">
-        <label>Sensibilité de détection <span id="syncSensValue">1.6</span></label>
-        <input id="syncSens" type="range" min="1.1" max="3" step="0.1" value="1.6">
-      </div>
-
-      <div class="control">
-        <label>Tolérance temporelle <span id="syncTolValue">80 ms</span></label>
-        <input id="syncTol" type="range" min="20" max="200" step="5" value="80">
-      </div>
-
-      <div class="control">
-        <label>Décalage des événements <span id="syncShiftValue">0 ms</span></label>
-        <input id="syncShift" type="range" min="-300" max="300" step="10" value="0">
-      </div>
-
-      <div class="control">
-        <label>Événements examinés à l'avance <span id="syncAheadValue">3</span></label>
-        <input id="syncAhead" type="range" min="1" max="8" step="1" value="3">
-      </div>
-
-      <div class="control">
-        <label>Temps manuels (secondes, séparés par des virgules)</label>
-        <input id="syncManual" type="text" placeholder="ex : 12.5, 13.25, 1:04.5">
-      </div>
-
-      <div class="status" id="syncInfo" style="text-align:left;">Charge une musique pour activer la synchronisation</div>
-    </details>
-
   </aside>
 
   </div>
@@ -795,14 +805,6 @@ const cfg = {
   musicLoop: true,
   avOffset: 0,
 
-  syncEnabled: true,
-  syncSource: "both",       // "both" | "auto" | "manual"
-  syncIntensity: 60,        // 0-100 : vitesse et accélération de correction
-  syncSensitivity: 1.6,     // détection des kicks (plus haut = moins d'événements)
-  syncTolerance: 80,        // tolérance temporelle (ms)
-  syncShift: 0,             // décalage des événements musicaux (ms)
-  syncAhead: 3,             // nombre d'événements examinés à l'avance
-
   effects: true,
   useGPU: true,
 
@@ -845,21 +847,9 @@ let groupDirections = [];
 let ringLocal = [];
 let ringJitter = [];
 let ringDataVersion = 0;
-let groupSync = [];          // correction de rotation de chaque paquet (rad)
-let groupSyncRate = [];      // vitesse de cette correction (rad/s)
-let syncVersion = 0;         // change à chaque correction (mise à jour GPU)
-let syncAnalysis = null;     // enveloppe basse fréquence de la musique
-let syncMusicEvents = [];    // instants retenus, en secondes de musique
-let syncManualTimes = [];    // instants saisis à la main
-let syncQueue = [];          // instants retenus, en temps de simulation
-let syncEvIdx = 0;           // prochain événement non traité
-let syncPlan = null;         // passage visé { idx, ev, hitT }
-let syncStats = { total: 0, hits: 0, errSum: 0 };
 let simSeedState = 0;        // générateur déterministe des collisions
 let simAccum = 0;            // temps réel non encore simulé (pas fixes)
 let departure = null;        // état de départ de la balle (sert à l'export)
-let lastSyncInfo = 0;
-let syncLayoutSig = null;   // tailles de paquets utilisées pour le dernier tirage
 let exportMode = false;      // true pendant l'export MP4 image par image
 let exportEvents = [];       // [temps, son clair ?] enregistrés pendant l'export
 let shift = 0;
@@ -922,10 +912,8 @@ function gapBaseForRing(index, time) {
   );
 }
 
-// Angle réel du trou = calcul habituel + correction de synchronisation
-// du paquet (0 quand la synchronisation est inactive).
 function gapAngleForRing(index, time = elapsed) {
-  return gapBaseForRing(index, time) + (groupSync[ringGroups[index]] || 0);
+  return gapBaseForRing(index, time);
 }
 
 // ======================================
@@ -940,8 +928,6 @@ function generateRingOffsets() {
 
   const lo = Math.min(cfg.groupMin, cfg.groupMax);
   const hi = Math.max(cfg.groupMin, cfg.groupMax);
-  const sizes = syncGroupSizes();
-
   let i = 0;
   let group = 0;
 
@@ -950,7 +936,7 @@ function generateRingOffsets() {
   // le paquet) et l'irrégularité (aléa par cercle) donnent les bords
   // en escalier / en spirale.
   while (i < cfg.count) {
-    const size = sizes ? sizes[group] : Math.floor(random(lo, hi + 1));
+    const size = Math.floor(random(lo, hi + 1));
     const groupOffset = Math.random() * TAU;
 
     for (let k = 0; k < size && i < cfg.count; k++, i++) {
@@ -962,9 +948,6 @@ function generateRingOffsets() {
 
     group++;
   }
-
-  groupSync = new Array(group).fill(0);
-  groupSyncRate = new Array(group).fill(0);
 
   generateRingDirections();
 }
@@ -1057,11 +1040,6 @@ function resetSimulation(keepLayout) {
 
   simSeedState = SIM_SEED;
   simAccum = 0;
-  syncPlan = null;
-  syncStats = { total: 0, hits: 0, errSum: 0 };
-  syncEvIdx = 0;
-  groupSync.fill(0);
-  groupSyncRate.fill(0);
 
   clearTimeout(leadTimer);
   leadTimer = null;
@@ -1076,7 +1054,6 @@ function resetSimulation(keepLayout) {
 
   updateStatus("Prêt à démarrer");
   updateCounter();
-  updateGroupControls();
   draw();
 }
 
@@ -1118,7 +1095,6 @@ function handleCrossing(index) {
   if (passed) {
     // La balle franchit le trou.
     level++;
-    registerSyncPass();
     setMusicClear(true);
 
     // Le zoom "avance" d'un anneau : la balle se retrouve juste à
@@ -1181,18 +1157,8 @@ function handleCrossing(index) {
 // PHYSIQUE
 // ======================================
 
-// ======================================
-// SYNCHRONISATION MUSICALE
-// ======================================
-// La balle traverse toujours l'anneau actif à un angle donné. Quand un
-// passage est prévu sur un événement musical, le trou de cet anneau (et
-// de son paquet) se déplace en douceur pour se trouver sur la balle au
-// bon moment. La balle n'est jamais modifiée : ni téléportée, ni
-// accélérée, ni libérée d'une collision.
-
 const SIM_DT = 1 / 240;        // pas de simulation fixe (aperçu = export)
 const SIM_SEED = 20260614;     // graine du générateur de collisions
-const SYNC_HOP = 0.01;         // résolution de l'analyse audio (10 ms)
 
 // Générateur déterministe. rngNext est "pur" : il permet de simuler à
 // l'avance les rebonds sans toucher à la graine réelle.
@@ -1213,407 +1179,10 @@ function simRandomRange(min, max) {
   return min + simRandom() * (max - min);
 }
 
-function angleWrap(a) {
-  return Math.atan2(Math.sin(a), Math.cos(a));
-}
-
 // Un pas de simulation : d'abord la correction des trous, puis la balle.
 function simStep(dt) {
-  syncStep(dt);
   updatePhysics(dt);
   elapsed += dt;
-}
-
-// Limites réelles, dérivées de l'intensité (0 à 100).
-function syncLimits() {
-  const k = clamp(cfg.syncIntensity, 0, 100) / 100;
-
-  return {
-    maxRate: (4 + 80 * k) * DEG,   // vitesse corrective max (rad/s)
-    maxAcc: (20 + 400 * k) * DEG   // accélération corrective max (rad/s²)
-  };
-}
-
-// Temps avant que la balle (à l'intérieur) atteigne le cercle de rayon R.
-// La balle suit une droite entre deux rebonds : le calcul est exact.
-function chordTime(px, py, vx, vy, R) {
-  const a = vx * vx + vy * vy;
-  if (a <= 0) return null;
-
-  const b = 2 * (px * vx + py * vy);
-  const c = px * px + py * py - R * R;
-  const disc = b * b - 4 * a * c;
-
-  if (disc < 0) return null;
-
-  const root = Math.sqrt(disc);
-  const t = c < 0 ? (-b + root) / (2 * a) : (-b - root) / (2 * a);
-
-  return t > 0 ? t : null;
-}
-
-// Prochain impact de la balle sur l'anneau actif (droite entre deux
-// rebonds, donc calcul exact).
-function predictHit(index) {
-  const t = chordTime(ball.x, ball.y, ball.vx, ball.vy, baseRadius(index));
-
-  if (t === null) return null;
-
-  const hx = ball.x + ball.vx * t;
-  const hy = ball.y + ball.vy * t;
-
-  return { t: elapsed + t, angle: Math.atan2(hy, hx) };
-}
-
-// Taille des paquets imposée par la détection : chaque paquet couvre la
-// partie de la musique comprise entre deux événements et reçoit des
-// anneaux proportionnels à sa durée. La somme vaut toujours cfg.count.
-function syncGroupSizes() {
-  if (!cfg.syncEnabled || !syncQueue.length) return null;
-
-  const edges = [0];
-
-  for (const t of syncQueue) {
-    if (t > 0 && t < cfg.duration) edges.push(t);
-  }
-
-  edges.push(cfg.duration);
-
-  const n = edges.length - 1;
-
-  if (cfg.count < n) return null;
-
-  const sizes = new Array(n);
-  let total = 0;
-
-  for (let k = 0; k < n; k++) {
-    sizes[k] = Math.max(1, Math.round(cfg.count * (edges[k + 1] - edges[k]) / cfg.duration));
-    total += sizes[k];
-  }
-
-  // Arrondis : on corrige sur le dernier paquet, sinon on revient au hasard.
-  sizes[n - 1] += cfg.count - total;
-
-  if (sizes[n - 1] < 1) return null;
-
-  return sizes;
-}
-
-// Déplace la correction d'un paquet vers une vitesse cible, sans
-// dépasser l'accélération maximale (pas de changement brusque).
-function moveGroupSync(g, desired, dt, maxAcc) {
-  const rate = groupSyncRate[g] || 0;
-  const step = maxAcc * dt;
-  const newRate = rate + clamp(desired - rate, -step, step);
-
-  groupSyncRate[g] = newRate;
-
-  if (newRate !== 0 || rate !== 0) {
-    groupSync[g] = angleWrap((groupSync[g] || 0) + newRate * dt);
-    syncVersion++;
-  }
-}
-
-// Les autres paquets reviennent doucement à zéro de vitesse.
-function relaxSync(dt, except) {
-  const lim = syncLimits();
-
-  for (let g = 0; g < groupSyncRate.length; g++) {
-    if (g !== except && groupSyncRate[g]) {
-      moveGroupSync(g, 0, dt, lim.maxAcc);
-    }
-  }
-}
-
-function syncStep(dt) {
-  const tolS = cfg.syncTolerance / 1000;
-
-  // Événements passés sans passage synchronisé : comptés comme manqués.
-  while (syncEvIdx < syncQueue.length && syncQueue[syncEvIdx] < elapsed - tolS) {
-    syncEvIdx++;
-    syncStats.total++;
-  }
-
-  const L = level;
-  const hit = cfg.syncEnabled && L < cfg.count && syncEvIdx < syncQueue.length
-    ? predictHit(L)
-    : null;
-
-  // Parmi les N prochains événements, on retient le plus proche du prochain impact.
-  let best = -1;
-  let bestDiff = Infinity;
-
-  if (hit) {
-    const end = Math.min(syncQueue.length, syncEvIdx + cfg.syncAhead);
-
-    for (let j = syncEvIdx; j < end; j++) {
-      const diff = Math.abs(syncQueue[j] - hit.t);
-
-      if (diff < bestDiff) {
-        bestDiff = diff;
-        best = j;
-      }
-    }
-  }
-
-  // Aucun événement assez proche : pas de correction, rotation naturelle.
-  if (best < 0 || bestDiff > tolS) {
-    syncPlan = null;
-    relaxSync(dt, -1);
-    return;
-  }
-
-  syncPlan = { idx: best, ev: syncQueue[best], hitT: hit.t };
-
-  // Le centre du trou doit être sur la balle au moment de l'impact.
-  const g = ringGroups[L];
-  const lim = syncLimits();
-  const target = hit.angle - gapBaseForRing(L, hit.t);
-  const err = angleDifference(target, groupSync[g] || 0);
-  const T = Math.max(0.02, hit.t - elapsed);
-  const desired = clamp(err / T, -lim.maxRate, lim.maxRate);
-
-  moveGroupSync(g, desired, dt, lim.maxAcc);
-  relaxSync(dt, g);
-}
-
-// Appelé juste après le passage (level a déjà été incrémenté). Le passage
-// ne valide qu'un événement musical proche (dans la tolérance) et non encore
-// traité : un passage d'un autre anneau ou hors tolérance ne compte pas.
-function registerSyncPass() {
-  const tolS = cfg.syncTolerance / 1000;
-  const end = Math.min(syncQueue.length, syncEvIdx + cfg.syncAhead + 1);
-
-  let found = -1;
-  let bestDiff = Infinity;
-
-  for (let j = syncEvIdx; j < end; j++) {
-    const diff = Math.abs(syncQueue[j] - elapsed);
-
-    if (diff <= tolS && diff < bestDiff) {
-      bestDiff = diff;
-      found = j;
-    }
-  }
-
-  if (found >= 0) {
-    // Les événements sautés avant celui-ci restent manqués.
-    syncStats.total += found + 1 - syncEvIdx;
-    syncStats.hits++;
-    syncStats.errSum += bestDiff;
-    syncEvIdx = found + 1;
-  }
-
-  syncPlan = null;
-  updateSyncInfo();
-}
-
-// ---- Analyse audio : grosse caisse ----
-
-// Enveloppe des basses (passe-bas ~120 Hz) par blocs de 10 ms.
-function computeEnvelope(buffer) {
-  const sr = buffer.sampleRate;
-  const hop = Math.max(1, Math.round(sr * SYNC_HOP));
-  const blocks = Math.floor(buffer.length / hop);
-  const env = new Float32Array(blocks);
-  const left = buffer.getChannelData(0);
-  const right = buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : null;
-  const a = 1 - Math.exp(-2 * Math.PI * 120 / sr);
-
-  let y = 0;
-
-  for (let b = 0; b < blocks; b++) {
-    let sum = 0;
-    const start = b * hop;
-
-    for (let i = start; i < start + hop; i++) {
-      const x = right ? (left[i] + right[i]) * 0.5 : left[i];
-      y += a * (x - y);
-      sum += Math.abs(y);
-    }
-
-    env[b] = sum / hop;
-  }
-
-  return { env, dt: hop / sr };
-}
-
-// Pics locaux nettement au-dessus de la moyenne glissante (±0,4 s).
-function pickKickTimes(analysis, sensitivity) {
-  if (!analysis) return [];
-
-  const env = analysis.env;
-  const n = env.length;
-  const prefix = new Float64Array(n + 1);
-  let maxV = 0;
-
-  for (let i = 0; i < n; i++) {
-    prefix[i + 1] = prefix[i] + env[i];
-    if (env[i] > maxV) maxV = env[i];
-  }
-
-  const win = Math.round(0.4 / analysis.dt);
-  const minGap = Math.round(0.18 / analysis.dt);
-  const floor = maxV * 0.04;   // ignore le silence
-  const times = [];
-  let last = -minGap;
-
-  for (let i = 1; i < n - 1; i++) {
-    const v = env[i];
-
-    if (v < floor || v < env[i - 1] || v <= env[i + 1]) continue;
-
-    const lo = Math.max(0, i - win);
-    const hi = Math.min(n, i + win + 1);
-    const mean = (prefix[hi] - prefix[lo]) / (hi - lo);
-
-    if (v > mean * sensitivity && i - last >= minGap) {
-      times.push(i * analysis.dt);
-      last = i;
-    }
-  }
-
-  return times;
-}
-
-function mergeEventTimes(a, b) {
-  const all = a.concat(b).sort((x, y) => x - y);
-  const out = [];
-
-  for (const t of all) {
-    if (!out.length || t - out[out.length - 1] > 0.02) out.push(t);
-  }
-
-  return out;
-}
-
-// Saisie manuelle : secondes (point décimal) ou m:ss, séparées par
-// des virgules ou des espaces.
-function parseManualTimes(text) {
-  return text
-    .split(/[,;\s]+/)
-    .map(part => {
-      part = part.trim();
-      if (!part) return NaN;
-
-      if (part.includes(":")) {
-        const [m, sec] = part.split(":");
-        return Number(m) * 60 + Number(sec);
-      }
-
-      return Number(part);
-    })
-    .filter(v => Number.isFinite(v) && v >= 0)
-    .sort((x, y) => x - y);
-}
-
-// Construit la liste des instants en temps de simulation, en tenant
-// compte du point de départ dans la musique, de la boucle et du décalage.
-function rebuildSyncQueue() {
-  syncQueue = [];
-
-  if (musicBuffer && cfg.syncEnabled && syncMusicEvents.length && musicBuffer.duration > 0) {
-    const D = musicBuffer.duration;
-    const off = clamp(cfg.musicOffset, 0, Math.max(0, D - 0.1));
-    const shift = cfg.syncShift / 1000;
-    const horizon = cfg.duration + 2;
-
-    for (let cycle = 0; cycle < 100000; cycle++) {
-      if (!cfg.musicLoop && cycle > 0) break;
-
-      const base = cycle * D;
-
-      if (base - off + shift > horizon) break;
-
-      for (const e of syncMusicEvents) {
-        if (cycle === 0 && e < off) continue;
-
-        const s = base + e - off + shift;
-
-        if (s < 0) continue;
-        if (s > horizon) break;
-
-        syncQueue.push(s);
-      }
-    }
-  }
-
-  const tolS = cfg.syncTolerance / 1000;
-
-  syncEvIdx = 0;
-  while (syncEvIdx < syncQueue.length && syncQueue[syncEvIdx] < elapsed - tolS) {
-    syncEvIdx++;
-  }
-}
-
-function refreshSyncEvents() {
-  const auto = cfg.syncSource !== "manual"
-    ? pickKickTimes(syncAnalysis, cfg.syncSensitivity)
-    : [];
-
-  const manual = cfg.syncSource !== "auto" ? syncManualTimes : [];
-
-  syncMusicEvents = mergeEventTimes(auto, manual);
-  rebuildSyncQueue();
-
-  // Les anneaux ne sont regénérés que si les paquets changent (pas à
-  // chaque mouvement de curseur), et jamais pendant l'animation.
-  const sig = (syncGroupSizes() || []).join(",");
-
-  if (sig !== syncLayoutSig && !running) {
-    syncLayoutSig = sig;
-    generateRingOffsets();
-  }
-
-  updateGroupControls();
-  updateSyncInfo();
-}
-
-// Avec la synchronisation, la taille des paquets vient de la détection :
-// les curseurs de paquets sont alors désactivés.
-// Les réglages qui changent la disposition des trous (nombre de cercles,
-// paquets) régénèrent les angles : pendant une animation, cela déplacerait
-// tous les trous d'un coup et effacerait les corrections de synchronisation.
-// Ils sont donc verrouillés pendant l'animation et réactivés à l'arrêt.
-function updateGroupControls() {
-  const syncLocked = cfg.syncEnabled && syncQueue.length > 0;
-  const layoutLocked = running;
-
-  document.getElementById("count").disabled = layoutLocked;
-  document.getElementById("groupMin").disabled = layoutLocked || syncLocked;
-  document.getElementById("groupMax").disabled = layoutLocked || syncLocked;
-}
-
-function updateSyncInfo() {
-  const el = document.getElementById("syncInfo");
-
-  if (!el) return;
-
-  if (!musicBuffer) {
-    el.textContent = "Charge une musique pour activer la synchronisation";
-    return;
-  }
-
-  if (!cfg.syncEnabled) {
-    el.textContent = "Synchronisation désactivée";
-    return;
-  }
-
-  const missed = syncStats.total - syncStats.hits;
-  const avgMs = syncStats.hits ? Math.round(1000 * syncStats.errSum / syncStats.hits) : null;
-
-  let text =
-    syncMusicEvents.length + " événements détectés · réussis : " +
-    syncStats.hits + " · manqués : " + missed +
-    (avgMs !== null ? " · écart moyen : " + avgMs + " ms" : "");
-
-  if (syncPlan) {
-    text += " · passage visé à " + syncPlan.hitT.toFixed(2) + " s";
-  } else if (syncEvIdx < syncQueue.length) {
-    text += " · prochain événement à " + syncQueue[syncEvIdx].toFixed(2) + " s";
-  }
-
-  el.textContent = text;
 }
 
 function updatePhysics(dt) {
@@ -2326,25 +1895,18 @@ function initGL() {
 // Envoie à la carte graphique l'angle de base et le sens de chaque anneau.
 function uploadRingData(g) {
   const key =
-    ringDataVersion + "|" + cfg.count + "|" + cfg.drift + "|" + cfg.jitter + "|" + syncVersion;
+    ringDataVersion + "|" + cfg.count + "|" + cfg.drift + "|" + cfg.jitter;
 
   if (g.dataKey === key) return;
 
   g.dataKey = key;
 
   const rows = Math.max(1, Math.ceil(cfg.count / DATA_TEX_WIDTH));
-
-  // Tampon réutilisé tant que la taille ne change pas.
-  if (!g.data || g.data.length !== DATA_TEX_WIDTH * rows * 4) {
-    g.data = new Uint8Array(DATA_TEX_WIDTH * rows * 4);
-  }
-
-  const data = g.data;
+  const data = new Uint8Array(DATA_TEX_WIDTH * rows * 4);
 
   for (let i = 0; i < cfg.count; i++) {
     let base =
       (ringOffsets[i] || 0) +
-      (groupSync[ringGroups[i]] || 0) +
       (ringLocal[i] || 0) * cfg.drift * DEG +
       (ringJitter[i] || 0) * cfg.jitter * DEG;
 
@@ -2934,11 +2496,6 @@ function animate(timestamp) {
   updateZoomSpring(dt);
   updateEffects(dt);
 
-  if (timestamp - lastSyncInfo >= 250) {
-    lastSyncInfo = timestamp;
-    updateSyncInfo();
-  }
-
   // Écrans 90/120/144 Hz : inutile de redessiner à chaque rafraîchissement.
   // La physique, elle, avance à chaque image avec le vrai temps écoulé.
   if (timestamp - lastDrawTime >= 10) {
@@ -2983,7 +2540,6 @@ function startSimulation() {
   paused = false;
   lastTime = 0;
 
-  updateGroupControls();
   startMusic();
   keepAwake(true);
 
@@ -3039,7 +2595,6 @@ function finishSimulation() {
   running = false;
   paused = false;
   finished = true;
-  updateGroupControls();
 
   cancelAnimationFrame(animationFrame);
 
@@ -3098,7 +2653,6 @@ function abortRecording(reason) {
   running = false;
   paused = false;
   finished = true;
-  updateGroupControls();
 
   cancelAnimationFrame(animationFrame);
   clearTimeout(leadTimer);
@@ -3882,9 +3436,7 @@ async function exportVideo() {
     encoder.configure(videoConfig);
 
     const frameTime = 1 / fps;
-    // Accumulateur : chaque image avance exactement 1/fps de simulation,
-    // quelle que soit la valeur de SIM_DT (pas de dérive de cadence).
-    let simRemainder = 0;
+    const stepsPerFrame = Math.round(frameTime / SIM_DT);
     const holdFrames = Math.round(fps * 0.6);   // image finale + fondu du son
     const maxFrames = Math.ceil((cfg.duration + 2) * fps);
 
@@ -3897,11 +3449,8 @@ async function exportVideo() {
       if (failure) throw failure;
 
       if (!finished) {
-        simRemainder += frameTime;
-
-        while (simRemainder >= SIM_DT - 1e-9 && !finished) {
+        for (let s = 0; s < stepsPerFrame && !finished; s++) {
           simStep(SIM_DT);
-          simRemainder -= SIM_DT;
 
           if (elapsed >= cfg.duration) finishSimulation();
         }
@@ -4099,13 +3648,6 @@ function bindRange(id, key, displayId, formatter = v => v) {
   const display = document.getElementById(displayId);
 
   input.addEventListener("input", () => {
-    // Nombre de cercles : jamais modifié pendant une animation (les tableaux
-    // de trous ont la taille de l'ancien nombre).
-    if (key === "count" && running) {
-      input.value = cfg.count;
-      return;
-    }
-
     cfg[key] = Number(input.value);
 
     if (display) {
@@ -4158,7 +3700,6 @@ bindRange("duration", "duration", "durationValue");
       }
     }
 
-    if (running) return;   // verrouillé pendant l'animation
     generateRingOffsets();
     draw();
   });
@@ -4181,12 +3722,10 @@ document.getElementById("avOffset").addEventListener("input", () => {
 
 document.getElementById("musicOffset").addEventListener("input", e => {
   cfg.musicOffset = Math.max(0, Number(e.target.value) || 0);
-  refreshSyncEvents();
 });
 
 document.getElementById("musicLoop").addEventListener("change", e => {
   cfg.musicLoop = e.target.checked;
-  refreshSyncEvents();
 });
 
 document.getElementById("musicFile").addEventListener("change", async e => {
@@ -4205,8 +3744,6 @@ document.getElementById("musicFile").addEventListener("change", async e => {
   try {
     const data = await file.arrayBuffer();
     musicBuffer = await audioCtx.decodeAudioData(data);
-    syncAnalysis = computeEnvelope(musicBuffer);
-    refreshSyncEvents();
 
     const minutes = Math.floor(musicBuffer.duration / 60);
     const seconds = Math.round(musicBuffer.duration % 60);
@@ -4257,27 +3794,51 @@ function shuffleLayout() {
 
 document.getElementById("shuffleBtn").addEventListener("click", shuffleLayout);
 
-// Petit écran : un seul groupe de réglages ouvert à la fois (le premier au
-// départ). Grand écran : tout reste ouvert.
+// Téléphone : une seule rubrique visible, choisie par un onglet en haut
+// de la zone de réglages. Grand écran : tout reste affiché, sans onglets.
 if (window.matchMedia && document.querySelectorAll) {
   const mobileQuery = window.matchMedia("(max-width: 1050px)");
-  const sections = document.querySelectorAll(".side details");
+  const sections = Array.from(document.querySelectorAll(".side details"));
+  const tabBar = document.getElementById("tabs");
+  const panels = document.querySelector(".panels");
+  const tabButtons = [];
+  let activeIndex = 0;
 
-  const applyPanelMode = () => {
-    sections.forEach((section, index) => {
-      section.open = mobileQuery.matches ? index === 0 : true;
+  const showSection = index => {
+    activeIndex = index;
+
+    sections.forEach((section, i) => {
+      section.classList.toggle("active", i === index);
     });
+
+    tabButtons.forEach((button, i) => {
+      button.classList.toggle("active", i === index);
+      button.setAttribute("aria-pressed", String(i === index));
+    });
+
+    panels.scrollTop = 0;
   };
 
-  sections.forEach(section => {
-    section.addEventListener("toggle", () => {
-      if (!mobileQuery.matches || !section.open) return;
+  sections.forEach((section, index) => {
+    const label = section.querySelector("summary").textContent.replace(/\s+/g, " ").trim();
+    const button = document.createElement("button");
 
-      sections.forEach(other => {
-        if (other !== section) other.open = false;
-      });
-    });
+    button.type = "button";
+    button.className = "tab";
+    button.textContent = label;
+    button.addEventListener("click", () => showSection(index));
+
+    tabBar.appendChild(button);
+    tabButtons.push(button);
   });
+
+  const applyPanelMode = () => {
+    sections.forEach(section => {
+      section.open = true;
+    });
+
+    showSection(activeIndex);
+  };
 
   if (mobileQuery.addEventListener) {
     mobileQuery.addEventListener("change", applyPanelMode);
@@ -4383,57 +3944,95 @@ if (!webCodecsSupported()) {
 // INITIALISATION
 // ======================================
 
-// ======================================
-// SYNCHRONISATION : RÉGLAGES
-// ======================================
-
-function bindSync(id, key, displayId, formatter = v => v) {
-  const input = document.getElementById(id);
-  const display = document.getElementById(displayId);
-
-  input.addEventListener("input", () => {
-    cfg[key] = Number(input.value);
-
-    if (display) display.textContent = formatter(cfg[key]);
-
-    refreshSyncEvents();
-  });
-}
-
-bindSync("syncIntensity", "syncIntensity", "syncIntensityValue");
-bindSync("syncSens", "syncSensitivity", "syncSensValue", v => Number(v).toFixed(1));
-bindSync("syncTol", "syncTolerance", "syncTolValue", v => v + " ms");
-bindSync("syncShift", "syncShift", "syncShiftValue", v => v + " ms");
-bindSync("syncAhead", "syncAhead", "syncAheadValue");
-
-document.getElementById("syncEnabled").addEventListener("change", e => {
-  cfg.syncEnabled = e.target.checked;
-  if (!cfg.syncEnabled) syncPlan = null;
-  refreshSyncEvents();
-});
-
-document.getElementById("syncSource").addEventListener("change", e => {
-  cfg.syncSource = e.target.value;
-  refreshSyncEvents();
-});
-
-// Le niveau (faible / moyen / fort) règle l'intensité ; le curseur reste modifiable.
-document.getElementById("syncLevel").addEventListener("change", e => {
-  cfg.syncIntensity = Number(e.target.value);
-  document.getElementById("syncIntensity").value = cfg.syncIntensity;
-  document.getElementById("syncIntensityValue").textContent = cfg.syncIntensity;
-});
-
-document.getElementById("syncManual").addEventListener("change", e => {
-  syncManualTimes = parseManualTimes(e.target.value);
-  refreshSyncEvents();
-});
-
-updateSyncInfo();
-
 generateStars();
 setRenderScale(previewScale);
 resetSimulation();
+
+// ======================================
+// SAUVEGARDE AUTOMATIQUE DES RÉGLAGES
+// ======================================
+// Les réglages (curseurs, couleurs, options) sont mémorisés dans le
+// navigateur à chaque changement et retrouvés à la prochaine ouverture.
+// Le fichier audio et l'animation ne sont pas sauvegardés.
+
+const SAVE_KEY = "ringBounce.settings.v1";
+const saveStatus = document.getElementById("saveStatus");
+let saveTimer = null;
+
+function settingsControls() {
+  return Array.from(document.querySelectorAll("input[id], select[id]"))
+    .filter(el => el.type !== "file");
+}
+
+function setSaveStatus(text) {
+  if (saveStatus) saveStatus.textContent = text;
+}
+
+function saveSettings() {
+  const data = {};
+
+  for (const el of settingsControls()) {
+    data[el.id] = el.type === "checkbox" ? el.checked : el.value;
+  }
+
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+    setSaveStatus("Réglages sauvegardés automatiquement");
+  } catch (error) {
+    setSaveStatus("Sauvegarde impossible dans ce navigateur");
+  }
+}
+
+function scheduleSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveSettings, 300);
+}
+
+function restoreSettings() {
+  let data = null;
+
+  try {
+    data = JSON.parse(localStorage.getItem(SAVE_KEY) || "null");
+  } catch (error) {
+    data = null;
+  }
+
+  if (!data || typeof data !== "object") return false;
+
+  const controls = settingsControls().filter(el => el.id in data);
+
+  for (const el of controls) {
+    if (el.type === "checkbox") el.checked = Boolean(data[el.id]);
+    else el.value = data[el.id];
+  }
+
+  // Prévient le reste de l'application (même chemin que la saisie manuelle).
+  for (const el of controls) {
+    el.dispatchEvent(new Event("input"));
+    el.dispatchEvent(new Event("change"));
+  }
+
+  return true;
+}
+
+document.addEventListener("input", scheduleSave);
+document.addEventListener("change", scheduleSave);
+
+document.getElementById("resetSettingsBtn").addEventListener("click", () => {
+  if (!confirm("Effacer les réglages sauvegardés et revenir aux valeurs de départ ?")) return;
+
+  try {
+    localStorage.removeItem(SAVE_KEY);
+  } catch (error) {
+    // Rien à effacer si le stockage est indisponible.
+  }
+
+  location.reload();
+});
+
+if (restoreSettings()) {
+  setSaveStatus("Réglages restaurés depuis la dernière session");
+}
 
 </script>
 </body>
